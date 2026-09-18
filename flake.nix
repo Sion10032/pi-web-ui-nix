@@ -63,13 +63,31 @@
       });
 
       checks = eachSystem ({ pkgs, system, ... }:
-        lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+        {
+          home-manager =
+            let
+              homeConfiguration = privateInputs.home-manager.lib.homeManagerConfiguration {
+                inherit pkgs;
+                modules = [ ./checks/home-manager.nix ];
+                extraSpecialArgs = { inherit self; };
+              };
+            in
+            homeConfiguration.activation-script;
+        } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           nixos-test = pkgs.callPackage ./checks/nixos-test.nix { inherit self; };
         });
 
       nixosModules = rec {
         pi-web-ui = { lib, pkgs, ... }: {
           imports = [ ./modules/nixos.nix ];
+          services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
+        };
+        default = pi-web-ui;
+      };
+
+      homeManagerModules = rec {
+        pi-web-ui = { lib, pkgs, ... }: {
+          imports = [ ./modules/home-manager.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
         };
         default = pi-web-ui;
