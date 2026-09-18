@@ -75,6 +75,18 @@
             homeConfiguration.activation-script;
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           nixos-test = pkgs.callPackage ./checks/nixos-test.nix { inherit self; };
+        } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+          darwin =
+            let
+              darwinConfiguration = privateInputs.nix-darwin.lib.darwinSystem {
+                modules = [
+                  ./checks/darwin.nix
+                  { nixpkgs.hostPlatform = system; }
+                ];
+                specialArgs = { inherit self; };
+              };
+            in
+            darwinConfiguration.config.system.build.toplevel;
         });
 
       nixosModules = rec {
@@ -88,6 +100,14 @@
       homeManagerModules = rec {
         pi-web-ui = { lib, pkgs, ... }: {
           imports = [ ./modules/home-manager.nix ];
+          services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
+        };
+        default = pi-web-ui;
+      };
+
+      darwinModules = rec {
+        pi-web-ui = { lib, pkgs, ... }: {
+          imports = [ ./modules/darwin.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
         };
         default = pi-web-ui;
