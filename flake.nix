@@ -31,6 +31,7 @@
         builtins.getFlake (builtins.unsafeDiscardStringContext flakePath);
 
       privateInputs = (loadPrivateFlake ./dev/private).inputs;
+      inherit (nixpkgs) lib;
     in
     {
       overlays.default = final: prev: {
@@ -60,5 +61,18 @@
         pi-web-ui = pkgs.callPackage ./package.nix { };
         default = self.packages.${system}.pi-web-ui;
       });
+
+      checks = eachSystem ({ pkgs, system, ... }:
+        lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          nixos-test = pkgs.callPackage ./checks/nixos-test.nix { inherit self; };
+        });
+
+      nixosModules = rec {
+        pi-web-ui = { lib, pkgs, ... }: {
+          imports = [ ./modules/nixos.nix ];
+          services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
+        };
+        default = pi-web-ui;
+      };
     };
 }
