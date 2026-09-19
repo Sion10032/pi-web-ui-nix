@@ -1,5 +1,7 @@
 # pi-web-ui-nix
 
+**English** | [简体中文](README.zh-CN.md)
+
 Nix packaging and NixOS / nix-darwin / home-manager modules for
 [pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) — a browser cockpit for
 AI coding agents (pi / DSH): chat, code, files, terminal and Git in one tab.
@@ -16,8 +18,7 @@ The flake provides:
   systems), and a darwin toplevel build (darwin only)
 
 Supported systems: `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`,
-`x86_64-darwin` — but see [Troubleshooting](#troubleshooting) regarding
-`x86_64-darwin` on current nixpkgs unstable.
+`x86_64-darwin`.
 
 ## Usage
 
@@ -106,6 +107,30 @@ agent on macOS):
 ```
 
 There is no `user` option here — the service runs as the current user.
+
+#### Opening the port
+
+home-manager runs as your user and cannot manage the host firewall, so this
+module has no `openFirewall` option (that option only exists on the NixOS
+module). To reach the service from other machines:
+
+1. Listen on all interfaces — the default `host` binds to loopback only:
+
+   ```nix
+   services.pi-web-ui.host = "0.0.0.0";
+   ```
+
+2. Open the configured port (`port`, default `8787`) at the **host** level:
+
+   - On a NixOS host, either use the NixOS module with
+     `services.pi-web-ui.openFirewall = true;`, or add the port yourself:
+
+     ```nix
+     networking.firewall.allowedTCPPorts = [ 8787 ];
+     ```
+
+   - On macOS, the launchd agent is reachable locally without extra config;
+     if you use the application firewall, allow `pi-web-ui` when prompted.
 
 ## Options
 
@@ -238,3 +263,7 @@ Unrelated to that change: the home-manager module
 but that is **home-manager's own** option set, which still uses
 `.enable` + freeform `.config` — it is unaffected by the nix-darwin schema
 change.
+
+## License
+
+[MIT](LICENSE)
