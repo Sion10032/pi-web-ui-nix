@@ -1,57 +1,100 @@
 {
   lib,
-  buildNpmPackage,
-  fetchurl,
+  stdenv,
+  fetchFromGitHub,
+  fetchPnpmDeps,
+  pnpm,
+  pnpmConfigHook,
   nodejs_22,
   python3,
 }: let
   version = "0.90.1";
+
+  src = fetchFromGitHub {
+    owner = "xing-shuyin";
+    repo = "pi-web-ui";
+    tag = "v${version}";
+    sha256 = "sha256-NcT4tmNLFHiF/efwuKVvnfJQW2QJMh9qAmzHMcJtDvw=";
+  };
 in
-  buildNpmPackage {
+  # 为什么用 pnpm 而不是 buildNpmPackage：
+  # @earendil-works/pi-coding-agent 发布的 tarball 内嵌 npm-shrinkwrap.json，
+  # 其中 5 个 @earendil-works/* 依赖缺 integrity，npm 解析时会整树继承该状态
+  # （fresh npm install 也复现），导致 fetchNpmDeps panic。pnpm 不解析依赖内嵌的
+  # shrinkwrap，不存在此问题。
+  #
+  # pnpm-lock.yaml 由上游同版本 tag 的 package-lock.json 经 `pnpm import` 转译：
+  # 版本忠实保留，缺失的 integrity 由 registry 元数据自动补齐。升级时需重新生成，
+  # 见 README 的升级流程。
+  stdenv.mkDerivation (finalAttrs: {
     pname = "pi-web-ui";
-    version = "0.90.1";
+    inherit version src;
 
-  src = fetchurl {
-    url = "https://registry.npmjs.org/pi-web-ui/-/pi-web-ui-${version}.tgz";
-    hash = "sha256-h+ekK3DJDz8WJsvHPGOiXW9QBeaD+t1Vc9uHbK6sGZs=";
-  };
+    postPatch = ''
+      cp ${./pnpm-lock.yaml} pnpm-lock.yaml
+      # pnpm ≥11 用 allowBuilds 映射批准依赖的构建脚本（onlyBuiltDependencies 已废弃）；
+      # 键名来自 ERR_PNPM_IGNORED_BUILDS 提示，上游依赖变化时按新提示更新（见 README 升级流程）
+      cat > pnpm-workspace.yaml <<'YAML'
+      allowBuilds:
+        "@google/genai": true
+        electron-winstaller: true
+        esbuild: true
+        node-pty: true
+        protobufjs: true
+      YAML
+    '';
 
-  # npm pack 的 tarball 不含 package-lock.json —— 从同版本 GitHub tag 补齐
-  postPatch = ''
-    cp ${fetchurl {
-      url = "https://raw.githubusercontent.com/xing-shuyin/pi-web-ui/v${version}/package-lock.json";
-      hash = "sha256-bERP/alrWdNO5vQpkneezIu3IhXYCVoK3QjRt4Gj0p4=";
-    }} package-lock.json
+    pnpmDeps = fetchPnpmDeps {
+      pname = finalAttrs.pname;
+      inherit (finalAttrs) src;
+      inherit (finalAttrs) postPatch;
+      fetcherVersion = 4;
+      # pnpm ≥ 12 默认启用 minimumReleaseAge 供应链策略，会拒绝发布不足 N 小时的包；
+      # 本项目依赖上游发布当天即打包，而 pnpm-lock.yaml 是 git 内版本冻结、经
+      # review 的产物，策略针对的浮动解析风险不适用，故显式关闭。
+      prePnpmInstall = ''
+        pnpm config set minimum-release-age 0
+      '';
+      hash = "sha256-amb9CcAj4VqVudJBtyUC1eMekjXu5RleeiiYld4zjdc=";
+    };
 
-    # 上游 lockfile 中 5 个 @earendil-works 嵌套依赖缺 integrity 字段，
-    # 会导致 fetchNpmDeps panic（non-git dependencies should have
-    # associated integrity）。这里按 registry tarball 的 sha512 SRI 补齐。
-    sed -i \
-      -e 's|"resolved": "https://registry.npmjs.org/@earendil-works/chord/-/chord-0.85.1.tgz"|"resolved": "https://registry.npmjs.org/@earendil-works/chord/-/chord-0.85.1.tgz",\n      "integrity": "sha512-VDlkEC3dhCzQ5fcyH1OhG19dq+6jCn+rqc/iXFivwDYGR5anwo2RCiXij9PpHhqNR5GuhhE+Er69Zi1Sn4eY6w=="|' \
-      -e 's|"resolved": "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.85.1.tgz"|"resolved": "https://registry.npmjs.org/@earendil-works/pi-agent-core/-/pi-agent-core-0.85.1.tgz",\n      "integrity": "sha512-hIXIP3eAWueAYiAl8aMvWCvvZ8Q5gT3Dip5bE5uJyIGh4+YlWRjtMLI4BaeoXoSs93zndjue61u1B/vhefLnuA=="|' \
-      -e 's|"resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.85.1.tgz"|"resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.85.1.tgz",\n      "integrity": "sha512-+VgVIJDkDO2efYJKEEqvPTH4zmnIaXdAppGbO+vKFA9qy5PdhFiAenuFAkU+oiCSfOC4dMHDyrjdQeL4ZoC5CQ=="|' \
-      -e 's|"resolved": "https://registry.npmjs.org/@earendil-works/pi-telemetry/-/pi-telemetry-0.85.1.tgz"|"resolved": "https://registry.npmjs.org/@earendil-works/pi-telemetry/-/pi-telemetry-0.85.1.tgz",\n      "integrity": "sha512-Bg/YN6kA7Swja/NQxka8xFdecb4E/auIEGF2G5A25EaQXhRnPj300/7/KpgsDDMYUzHTDAv4RyUxaQPJKW81Rw=="|' \
-      -e 's|"resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.85.1.tgz"|"resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.85.1.tgz",\n      "integrity": "sha512-OIzw9efInmO4WOBnD4TxcTdBjmzvYJpzslkgoUro946nEGoYWg5rwv1p4fDt3/JvMx9QybryUCUwlm7j8Dreig=="|' \
-      package-lock.json
-  '';
+    nativeBuildInputs = [
+      pnpm
+      pnpmConfigHook
+      nodejs_22 # build 脚本内部链式调用 npm run build:web 等
+      python3 # node-gyp（node-pty 原生编译）
+    ];
 
-  npmDepsHash = "sha256-BCJVLgB/FvojwarCsltW0WU0aF3Mdp5nzrY3MyEI7nw=";
+    # GitHub tag 不含 dist/ web/dist/ 构建产物（只存在于 npm tarball），
+    # 必须真跑上游构建；node-pty 由 pnpm rebuild 阶段编译
+    buildPhase = ''
+      runHook preBuild
+      # node-pty 的 install 脚本以 `node-gyp` 命令行调用编译；node-gyp 不在其自身
+      # 依赖里，把 lock 钉住的树内 node-gyp 暴露到 .bin 并加入 PATH
+      mkdir -p node_modules/.bin
+      ln -sf $PWD/node_modules/.pnpm/node-gyp@*/node_modules/node-gyp/bin/node-gyp.js node_modules/.bin/node-gyp
+      export PATH="$PWD/node_modules/.bin:$PATH"
+      pnpm rebuild --pending
+      pnpm run build
+      runHook postBuild
+    '';
 
-  # fetch-npm-deps 产出的缓存条目 time=0，npm 10 视为过期需要重验证；
-  # 只读 store 缓存无法写入会导致 ENOTCACHED，故复制为可写缓存
-  makeCacheWritable = true;
+    installPhase = ''
+      runHook preInstall
+      # 清理 buildPhase 注入的绝对路径符号链接（指向 /build，复制进 $out 会悬空）
+      rm -f node_modules/.bin/node-gyp
+      mkdir -p $out/lib/node_modules/pi-web-ui $out/bin
+      cp -a . $out/lib/node_modules/pi-web-ui/
+      patchShebangs $out/lib/node_modules/pi-web-ui/bin/pi-web-ui.mjs
+      ln -s ../lib/node_modules/pi-web-ui/bin/pi-web-ui.mjs $out/bin/pi-web-ui
+      runHook postInstall
+    '';
 
-  # tarball 已预构建（dist/ web/dist/ 齐全），不跑上游构建；node-pty 由 rebuild 阶段编译
-  dontNpmBuild = true;
-
-  nodejs = nodejs_22;
-  nativeBuildInputs = [ python3 ]; # node-gyp 需要
-
-  meta = {
-    description = "Browser cockpit for AI coding agents (pi / DSH): chat, code, files, terminal, Git in one tab";
-    homepage = "https://github.com/xing-shuyin/pi-web-ui";
-    license = lib.licenses.mit;
-    mainProgram = "pi-web-ui";
-    platforms = lib.platforms.unix;
-  };
-}
+    meta = {
+      description = "Browser cockpit for AI coding agents (pi / DSH): chat, code, files, terminal, Git in one tab";
+      homepage = "https://github.com/xing-shuyin/pi-web-ui";
+      license = lib.licenses.mit;
+      mainProgram = "pi-web-ui";
+      platforms = lib.platforms.unix;
+    };
+  })

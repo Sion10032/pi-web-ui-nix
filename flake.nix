@@ -52,6 +52,7 @@
         default = pkgs.mkShell {
           packages = with pkgs; [
             nodejs_22
+            pnpm # 重新生成 pnpm-lock.yaml（pnpm import）用
             nixfmt-rfc-style
           ];
         };

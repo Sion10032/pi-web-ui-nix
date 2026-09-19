@@ -6,8 +6,8 @@ AI coding agents (pi / DSH): chat, code, files, terminal and Git in one tab.
 
 The flake provides:
 
-- `packages.<system>.pi-web-ui` (and `.default`) — the `pi-web-ui` npm package
-  built with `buildNpmPackage`
+- `packages.<system>.pi-web-ui` (and `.default`) — the pi-web-ui server/CLI,
+  built from the GitHub source tag with pnpm (`fetchPnpmDeps` + `pnpmConfigHook`)
 - `overlays.default`
 - `nixosModules.default`, `darwinModules.default`, `homeManagerModules.default`
 - `apps.<system>.update-dev-private-narHash`
@@ -25,9 +25,9 @@ Add the flake to your inputs:
 
 ```nix
 {
-  inputs.pi-web-ui-nix.url = "github:<owner>/pi-web-ui-nix";
+  inputs.pi-web-ui-nix.url = "github:Sion10032/pi-web-ui-nix";
   # or, while developing locally:
-  # inputs.pi-web-ui-nix.url = "path:/home/sion/dev/pi-web-ui-nix";
+  # inputs.pi-web-ui-nix.url = "path:/absolute/path/to/pi-web-ui-nix";
 }
 ```
 
@@ -35,7 +35,7 @@ Add the flake to your inputs:
 
 ```nix
 {
-  inputs.pi-web-ui-nix.url = "github:<owner>/pi-web-ui-nix";
+  inputs.pi-web-ui-nix.url = "github:Sion10032/pi-web-ui-nix";
 
   outputs = { self, nixpkgs, pi-web-ui-nix }: {
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
@@ -61,7 +61,7 @@ configured `user`.
 
 ```nix
 {
-  inputs.pi-web-ui-nix.url = "github:<owner>/pi-web-ui-nix";
+  inputs.pi-web-ui-nix.url = "github:Sion10032/pi-web-ui-nix";
 
   outputs = { self, nix-darwin, pi-web-ui-nix }: {
     darwinConfigurations.myhost = nix-darwin.lib.darwinSystem {
@@ -89,7 +89,7 @@ agent on macOS):
 
 ```nix
 {
-  inputs.pi-web-ui-nix.url = "github:<owner>/pi-web-ui-nix";
+  inputs.pi-web-ui-nix.url = "github:Sion10032/pi-web-ui-nix";
 
   outputs = { self, nixpkgs, home-manager, pi-web-ui-nix }: {
     homeConfigurations.me = home-manager.lib.homeManagerConfiguration {
@@ -143,15 +143,12 @@ home-manager has no `user` option — the service runs as the current user.
 ## Running directly
 
 ```console
-$ nix run github:<owner>/pi-web-ui-nix -- --version
+$ nix run github:Sion10032/pi-web-ui-nix -- --version
 ```
-
-Substitute your GitHub owner/org — this repository has no canonical remote
-published yet.
 
 ## Development
 
-Enter the dev shell (nodejs 22 + nixfmt-rfc-style):
+Enter the dev shell (nodejs 22 + pnpm + nixfmt-rfc-style):
 
 ```console
 $ nix develop
@@ -161,7 +158,7 @@ The flake's `checks` reference `home-manager` and `nix-darwin` inputs that are
 **not** part of the public flake's own `inputs` — they live in
 `dev/private/flake.nix`, a private dev flake that is loaded at evaluation time
 via `loadPrivateFlake` (see `flake.nix`). This keeps the public input graph
-minimal: users pulling `github:<owner>/pi-web-ui-nix` do not fetch or evaluate
+minimal: users pulling `github:Sion10032/pi-web-ui-nix` do not fetch or evaluate
 the test-only inputs, while `nix flake check` still exercises the modules
 against real home-manager / nix-darwin. The same pattern is used by
 [sops-nix](https://github.com/Mic92/sops-nix) (see its `dev/private`).
@@ -176,42 +173,55 @@ $ nix run .#update-dev-private-narHash
 
 ## Upgrading to a new upstream version
 
-1. Edit `package.nix`: change the version in the `let version = "…"` binding
-   **and** the `version = "…"` field of the derivation (both must match).
-   The `let` binding feeds both the npm tarball URL and the `package-lock.json`
-   URL fetched in `postPatch`.
+1. Edit `package.nix`: change the version in the `let version = "…"` binding.
 
-2. Iterate the three hashes. Each of the following will fail once with a
-   hash mismatch; copy the `got: sha256-…` value from the error output back
-   into `package.nix`, then re-run until it builds:
+2. Regenerate `pnpm-lock.yaml` from the new tag (the script downloads the
+   tag's `package.json` + `package-lock.json` and runs `pnpm import` —
+   versions imported verbatim, missing integrities filled from registry
+   metadata; falls back to the pinned `pnpm_12` from `nix develop` if pnpm
+   is not on `PATH`):
 
    ```console
-   $ nix build .#pi-web-ui -L
+   $ ./dev/update-pnpm-lock.sh
    ```
 
-   Fix them in this order:
+3. Iterate the two hashes the usual way (`nix build .#pi-web-ui -L`, copy
+   each `got: sha256-…` from the mismatch errors back into `package.nix`):
+   first `src`, then `pnpmDeps.hash`.
 
-   1. `src.hash` — the npm tarball hash.
-   2. The `fetchurl` hash inside `postPatch` — the GitHub `package-lock.json`
-      for the new tag.
-   3. `npmDepsHash` — the npm dependency closure.
-
-3. The `postPatch` `sed` block patches `integrity` fields into upstream
-   lockfile entries that are missing them (nested `@earendil-works/*`
-   packages); `fetchNpmDeps` panics on non-git dependencies without integrity.
-   If the new lockfile changes its missing-integrity set, update the sed
-   expressions (add/remove/retarget `-e` lines) accordingly.
-
-4. Note `makeCacheWritable = true` is required: the npm-deps cache entries
-   produced by `fetch-npm-deps` have `time=0`, which npm 10 treats as stale
-   and tries to re-verify; a read-only store cache then fails with
-   `ENOTCACHED`.
+4. If the build fails with `ERR_PNPM_IGNORED_BUILDS`, copy the package names
+   from the error into the `allowBuilds` map written by `postPatch` in
+   `package.nix`.
 
 5. Verify: `nix run .# -- --version` should print the new version, and
    `nix flake check -L` should still pass (it rebuilds the NixOS VM test and
    the home-manager activation check).
 
 ## Troubleshooting
+
+### Why pnpm instead of npm (upstream shrinkwrap issue)
+
+`@earendil-works/pi-coding-agent` publishes a tarball with an embedded
+`npm-shrinkwrap.json` in which five `@earendil-works/*` dependencies have a
+`resolved` URL but no `integrity` field. npm inherits a shrinkwrapped
+dependency subtree verbatim — including the missing integrities — so every
+`npm install` (fresh resolution included) reproduces the gap, and nixpkgs'
+`fetchNpmDeps` refuses to build it. pnpm does not honour dependency-embedded
+shrinkwraps, and `pnpm import` converts upstream's `package-lock.json` into
+`pnpm-lock.yaml` while filling the missing integrities from registry metadata
+(versions preserved verbatim). If upstream ever fixes or drops that
+shrinkwrap, migrating back to `buildNpmPackage` would be straightforward.
+
+Two pnpm-specific notes baked into `package.nix`:
+
+- `pnpm config set minimum-release-age 0` in `prePnpmInstall`: pnpm ≥ 12 by
+  default rejects packages published more recently than a cutoff; this repo
+  often packages day-old upstream releases pinned by a frozen, reviewed
+  lockfile, so the policy is explicitly relaxed for the fetcher.
+- `allowBuilds`: pnpm ≥ 11 requires explicit approval for dependency build
+  scripts (`node-pty`'s node-gyp compile, esbuild, …). Note that
+  `onlyBuiltDependencies` is the removed pre-v11 spelling — pnpm ≥ 11 reads
+  it from config but nothing acts on it.
 
 ### nix-darwin `launchd.agents` schema change (unstable / 26.11)
 
@@ -228,13 +238,3 @@ Unrelated to that change: the home-manager module
 but that is **home-manager's own** option set, which still uses
 `.enable` + freeform `.config` — it is unaffected by the nix-darwin schema
 change.
-
-### x86_64-darwin dropped from nixpkgs unstable (26.11)
-
-`nix flake check --all-systems` fails on `x86_64-darwin` with current
-nixpkgs unstable, because that system was dropped there. This is a known
-limitation: the flake keeps the 4-system list for `aarch64-darwin`
-future-proofing. Intel Mac users must pin an older nixpkgs input (e.g.
-`github:NixOS/nixpkgs/nixos-25.05` or an older unstable revision) rather
-than following `nixos-unstable`. On the CI matrix, `macos-14`/`macos-15`
-runners are ARM (`aarch64-darwin`) and are unaffected.
