@@ -54,6 +54,18 @@ in
       # review 的产物，策略针对的浮动解析风险不适用，故显式关闭。
       prePnpmInstall = ''
         pnpm config set minimum-release-age 0
+        # pnpm 12（pacquet）在 macOS 上会启用 dir-clone cache（pnpm 源码
+        # crates/deps-restorer/src/dir_clone_cache.rs 的 eligible()：仅
+        # cfg!(target_os = "macos") 且 package-import-method 为
+        # auto/clone/clone-or-copy 时生效），把整棵依赖树按真实文件名物化到
+        # <store>/links/。该目录只存在于 macOS，因此：
+        #  1. FOD 内容随平台变化（Linux 的 store 没有 links/），与单哈希设计冲突；
+        #  2. fixupPhase 的 `find $storePath -name '*.json' | jq` 会扫到依赖自带的
+        #     JSONC 文件（如 @anthropic-ai/sdk/src/tsconfig.json），jq 以 exit 5
+        #     失败：Invalid numeric literal at line 2, column 5。
+        # 显式指定 hardlink 可让该 cache 不生效（EXDEV 时 pacquet 自行回退 copy）；
+        # Linux 上 auto 本就以 hardlink 起步，store 内容不变。
+        pnpm config set package-import-method hardlink
       '';
       hash = "sha256-amb9CcAj4VqVudJBtyUC1eMekjXu5RleeiiYld4zjdc=";
     };
