@@ -8,13 +8,13 @@
   nodejs_22,
   python3,
 }: let
-  version = "0.91.0";
+  version = "0.94.1";
 
   src = fetchFromGitHub {
     owner = "xing-shuyin";
     repo = "pi-web-ui";
     tag = "v${version}";
-    sha256 = "sha256-xZF7bJvte/kAE2fwjpCeWGESf/rHkcWKmeBBbKbDH+Y=";
+    sha256 = "sha256-HMsaFAuATIdiQLB/xr/EWPa7yeYInHjhesgRaEtWMNk=";
   };
 in
   # 为什么用 pnpm 而不是 buildNpmPackage：
