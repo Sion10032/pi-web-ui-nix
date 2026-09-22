@@ -17,8 +17,7 @@ The flake provides:
 - `checks`: a NixOS VM test (Linux), a home-manager activation check (all
   systems), and a darwin toplevel build (darwin only)
 
-Supported systems: `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`,
-`x86_64-darwin`.
+Supported systems: `x86_64-linux`, `aarch64-linux`, `aarch64-darwin`.
 
 ## Usage
 

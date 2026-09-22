@@ -17,8 +17,7 @@ NixOS / nix-darwin / home-manager 模块 —— pi-web-ui 是 AI 编程代理（
 - `checks`：NixOS VM 测试（Linux）、home-manager activation 检查（全系统）、
   darwin toplevel 构建（仅 darwin）
 
-支持的系统：`x86_64-linux`、`aarch64-linux`、`aarch64-darwin`、
-`x86_64-darwin`。
+支持的系统：`x86_64-linux`、`aarch64-linux`、`aarch64-darwin`。
 
 ## 用法
 
