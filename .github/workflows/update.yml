@@ -1,0 +1,283 @@
+name: Update pi-web-ui
+
+# 把 README「Upgrading to a new upstream version」那套固定流程自动化成「开一个
+# 可合并的 PR」：版本号、pnpm-lock.yaml、src / pnpmDeps 两个 FOD hash 全部由本
+# workflow 处理；验证交给 ci.yml（这里只做 nix build + nix run 自检，不重复跑
+# nix flake check）。
+#
+# 为什么不用 nix-update：它只在「同一次运行真的改写了版本号」时才修 hash
+# （update.py 的 update_hash 门控，以及 dependency_hashes.py 里
+# `if not (update_hash or not package.hash) ...: return`），而 pnpmDeps 的 hash
+# 必须在 pnpm-lock.yaml 重新生成之后才能算出来 —— 这两步没法在同一次 nix-update
+# 运行里同时满足，所以这里直接按 README 第 3 步的 got: 循环来做。
+
+on:
+  schedule:
+    # 03:00 UTC / 11:00 北京时间
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Upstream version (v prefix optional). Empty = newest stable release
+        required: false
+        default: ""
+      dry_run:
+        description: Run the update and the self-check, write the job summary, do not open/update a PR
+        type: boolean
+        default: false
+
+concurrency:
+  # 串行执行且不取消进行中的运行：半成品工作区没有价值
+  group: update-pi-web-ui
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM: xing-shuyin/pi-web-ui
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    # pnpm fetch + electron 下载 + node-pty 编译，留足余量
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Resolve upstream version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.UPDATE_TOKEN || github.token }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          current=$(sed -n 's/^[[:space:]]*version = "\(.*\)";.*/\1/p' package.nix | head -1)
+          if [ -n "${REQUESTED:-}" ]; then
+            new="${REQUESTED#v}"
+          else
+            # releases/latest 天然排除 prerelease 与 draft
+            new=$(gh api "repos/${UPSTREAM}/releases/latest" --jq .tag_name | sed 's/^v//')
+          fi
+          if ! printf '%s' "$new" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::cannot determine a version number from '${new}'"
+            exit 1
+          fi
+          {
+            echo "current=${current}"
+            echo "new=${new}"
+            echo "changed=$([ "$current" != "$new" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+          echo "package.nix: ${current} -> ${new}"
+
+      - name: Write the new version
+        if: ${{ steps.version.outputs.changed == 'true' }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          set -euo pipefail
+          # package.nix 中版本号的单一来源
+          sed -i "s|^\([[:space:]]*version = \"\)[^\"]*\(\";\)$|\1${NEW_VERSION}\2|" package.nix
+          # 防静默 no-op（例如缩进或引号变了）
+          if ! grep -qx "  version = \"${NEW_VERSION}\";" package.nix; then
+            echo "::error::package.nix still does not carry version ${NEW_VERSION}"
+            exit 1
+          fi
+
+      - name: Regenerate pnpm-lock.yaml
+        if: ${{ steps.version.outputs.changed == 'true' }}
+        # 脚本自己从 package.nix 读版本号，并下载该 tag 的 package-lock.json 做
+        # pnpm import；走 devShell 以保证 pnpm 版本与仓库一致
+        run: nix develop .#default -c ./dev/update-pnpm-lock.sh
+
+      - name: Iterate hashes / allowBuilds until the build passes
+        if: ${{ steps.version.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          log=/tmp/pi-web-ui-build.log
+          notes=/tmp/pi-web-ui-notes.md
+          notes_allow=/tmp/pi-web-ui-allow.md
+          : > "$notes"
+          : > "$notes_allow"
+
+          # 把包名插进 package.nix 中 postPatch 写入的 allowBuilds 块，并保持
+          # 字典序 —— LC_ALL=C 下 `"` 排在字母之前，与文件现有顺序一致
+          add_allow_builds() {
+            local start end tmp name entries=()
+            start=$(grep -n '^      allowBuilds:$' package.nix | head -1 | cut -d: -f1 || true)
+            if [ -z "$start" ]; then
+              echo "::error::no allowBuilds block found in package.nix"
+              return 1
+            fi
+            end=$((start + 1))
+            while [ "$(sed -n "${end}p" package.nix | grep -cE '^        .*: true$')" = "1" ]; do
+              end=$((end + 1))
+            done
+            for name in "$@"; do
+              case $name in
+                @*) entries+=("        \"${name}\": true") ;;
+                *) entries+=("        ${name}: true") ;;
+              esac
+            done
+            tmp=$(mktemp)
+            {
+              sed -n "1,${start}p" package.nix
+              {
+                sed -n "$((start + 1)),$((end - 1))p" package.nix
+                printf '%s\n' "${entries[@]}"
+              } | LC_ALL=C sort -u
+              sed -n "${end},\$p" package.nix
+            } > "$tmp"
+            # 用重定向而非 mv，保留原文件权限
+            cat "$tmp" > package.nix
+            rm -f "$tmp"
+          }
+
+          # 无匹配时返回空串而不是让 set -e 干掉整个 step
+          extract_hash() {
+            { grep -oE "$1" "$log" || true; } | tail -1 | sed -E "$2"
+          }
+
+          for round in 1 2 3 4 5 6; do
+            echo "::group::build attempt ${round}/6"
+            if nix build .#pi-web-ui -L 2>&1 | tee "$log"; then
+              echo "::endgroup::"
+              echo "build passed on attempt ${round}"
+              exit 0
+            fi
+            echo "::endgroup::"
+
+            # 1) FOD hash 不匹配：按报错里的 specified/expected + got 替换。
+            #    不区分 src 与 pnpmDeps —— 报错信息本身指明了是哪一对，
+            #    配错时下一轮会以新的 mismatch 自我纠正。放在 allowBuilds 之前，
+            #    是为了避免在同一条日志里两种错误同时出现时多写一条 allowBuilds
+            specified=$(extract_hash '(specified|expected): +[a-z0-9]+[:-][A-Za-z0-9+/=]+' 's/^[^:]+: +//')
+            got=$(extract_hash 'got: +[a-z0-9]+[:-][A-Za-z0-9+/=]+' 's/^got: +//')
+            if [ -n "$specified" ] && [ -n "$got" ] && [ "$specified" != "$got" ]; then
+              if ! grep -qF "$specified" package.nix; then
+                echo "::error::hash ${specified} from the build log is not in package.nix, cannot replace it"
+                exit 1
+              fi
+              sed -i "s|${specified}|${got}|" package.nix
+              printf -- '- `%s…` -> `%s…`\n' "${specified:0:16}" "${got:0:16}" >> "$notes"
+              echo "updated hash: ${specified:0:16}… -> ${got:0:16}…"
+              continue
+            fi
+
+            # 2) pnpm 拒绝执行依赖的构建脚本：把包名加入 allowBuilds
+            if grep -q 'Ignored build scripts' "$log"; then
+              names=$(sed -n 's/.*Ignored build scripts: *//p' "$log" \
+                | tr ',' '\n' | tr -d ' \t' | sed 's/\.$//' | grep -v '^$' \
+                | sed 's/@[0-9][^@]*$//' | LC_ALL=C sort -u || true)
+              if [ -n "$names" ]; then
+                # shellcheck disable=SC2086
+                add_allow_builds $names
+                # shellcheck disable=SC2086
+                printf -- '- `%s`\n' $names >> "$notes_allow"
+                echo "added to allowBuilds: $(printf '%s' "$names" | tr '\n' ' ')"
+                continue
+              fi
+            fi
+
+            echo "::error::build failed, and this is not a hash / allowBuilds problem we can fix automatically"
+            tail -n 40 "$log"
+            exit 1
+          done
+
+          echo "::error::build still failing after 6 rounds"
+          tail -n 40 "$log"
+          exit 1
+
+      - name: Self-check
+        if: ${{ steps.version.outputs.changed == 'true' }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+        run: |
+          set -euo pipefail
+          out=$(nix run .# -- --version)
+          echo "nix run .# -- --version -> ${out}"
+          if ! printf '%s' "$out" | grep -qF "$NEW_VERSION"; then
+            echo "::error::self-check failed: --version printed '${out}', which does not contain ${NEW_VERSION}"
+            exit 1
+          fi
+
+      - name: Compose the pull request body
+        if: ${{ steps.version.outputs.changed == 'true' }}
+        env:
+          OLD_VERSION: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Automated update of [pi-web-ui](https://github.com/${UPSTREAM}) \`${OLD_VERSION}\` → \`${NEW_VERSION}\`."
+            echo
+            echo "- Upstream release: https://github.com/${UPSTREAM}/releases/tag/v${NEW_VERSION}"
+            echo "- \`pnpm-lock.yaml\`: regenerated by \`dev/update-pnpm-lock.sh\` from this tag's \`package-lock.json\` via \`pnpm import\`"
+            if [ -s /tmp/pi-web-ui-notes.md ]; then
+              echo
+              echo "Fixed-output (FOD) hash changes:"
+              cat /tmp/pi-web-ui-notes.md
+            fi
+            if [ -s /tmp/pi-web-ui-allow.md ]; then
+              echo
+              echo "New \`allowBuilds\` entries (dependencies whose build scripts pnpm refused to run):"
+              cat /tmp/pi-web-ui-allow.md
+              echo
+              echo "> Their build scripts are executed inside the sandbox — confirm they are expected."
+            fi
+            echo
+            echo "\`nix build .#pi-web-ui\` and \`nix run .# -- --version\` passed in [this run](${RUN_URL}); full verification runs in this PR's CI."
+            echo
+            echo "Generated by \`.github/workflows/update.yml\`. The branch \`update/pi-web-ui\` is reused, so the next run rebuilds this same PR from \`main\`."
+          } > /tmp/pi-web-ui-pr-body.md
+
+      - name: Write the job summary
+        if: ${{ !cancelled() }}
+        env:
+          OLD_VERSION: ${{ steps.version.outputs.current }}
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          CHANGED: ${{ steps.version.outputs.changed }}
+        run: |
+          set -uo pipefail
+          {
+            echo "## pi-web-ui ${OLD_VERSION:-?} → ${NEW_VERSION:-?}"
+            echo
+            if [ "${CHANGED}" != "true" ]; then
+              echo "package.nix already carries the target version (or the version could not be resolved); nothing was changed."
+            else
+              if [ -s /tmp/pi-web-ui-notes.md ]; then
+                echo "### FOD hash changes"
+                cat /tmp/pi-web-ui-notes.md
+              fi
+              if [ -s /tmp/pi-web-ui-allow.md ]; then
+                echo "### New allowBuilds entries"
+                cat /tmp/pi-web-ui-allow.md
+              fi
+              echo "### Changed files"
+              git diff --stat
+              echo "### package.nix"
+              git diff -- package.nix
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the pull request
+        # 显式写 success()：构建或自检失败时绝不能开出 PR（不依赖隐式的 success()）
+        if: ${{ success() && steps.version.outputs.changed == 'true' && !inputs.dry_run }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # GITHUB_TOKEN 创建的 PR 不会正常触发 ci.yml，因此优先用 PAT
+          token: ${{ secrets.UPDATE_TOKEN || github.token }}
+          branch: update/pi-web-ui
+          base: main
+          delete-branch: false
+          # 只提交这两个文件，避免把构建残留带进 PR
+          add-paths: |
+            package.nix
+            pnpm-lock.yaml
+          commit-message: "chore: bump pi-web-ui to ${{ steps.version.outputs.new }}"
+          title: "chore: bump pi-web-ui to ${{ steps.version.outputs.new }}"
+          body-path: /tmp/pi-web-ui-pr-body.md
