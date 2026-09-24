@@ -13,6 +13,10 @@ jobs:
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v16
+      - uses: actions/checkout@v7
+      # v21 起 determinate 默认 true（会改装 Determinate Nix 并登录 FlakeHub），
+      # 显式关闭以继续使用上游 Nix，保持与 v16 相同的行为
+      - uses: DeterminateSystems/nix-installer-action@v23
+        with:
+          determinate: false
       - run: nix flake check -L

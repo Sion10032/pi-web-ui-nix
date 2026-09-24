@@ -44,9 +44,13 @@ jobs:
     # pnpm fetch + electron 下载 + node-pty 编译，留足余量
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: DeterminateSystems/nix-installer-action@v16
+      # v21 起 determinate 默认 true（会改装 Determinate Nix 并登录 FlakeHub），
+      # 显式关闭以继续使用上游 Nix，保持与 v16 相同的行为
+      - uses: DeterminateSystems/nix-installer-action@v23
+        with:
+          determinate: false
 
       - name: Resolve upstream version
         id: version
@@ -267,7 +271,7 @@ jobs:
       - name: Open or update the pull request
         # 显式写 success()：构建或自检失败时绝不能开出 PR（不依赖隐式的 success()）
         if: ${{ success() && steps.version.outputs.changed == 'true' && !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           # GITHUB_TOKEN 创建的 PR 不会正常触发 ci.yml，因此优先用 PAT
           token: ${{ secrets.UPDATE_TOKEN || github.token }}
