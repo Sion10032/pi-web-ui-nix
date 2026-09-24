@@ -97,6 +97,14 @@ in
       rm -f node_modules/.bin/node-gyp
       mkdir -p $out/lib/node_modules/pi-web-ui $out/bin
       cp -a . $out/lib/node_modules/pi-web-ui/
+      # patchShebangs 只遍历已带可执行位的文件（实现末尾是
+      # `find "$@" -type f -perm -0100`），所以它既不会给文件补 +x，也不会重写
+      # 没有执行位文件的 shebang。上游 v0.95.0 起 bin/pi-web-ui.mjs 在 git 里丢了
+      # exec 位（v0.94.1 的 tree mode 为 100755，v0.95.0 变成 100644），cp -a 会
+      # 把这份权限原样带进 $out，patchShebangs 于是整个跳过该文件：shebang 停在
+      # `#!/usr/bin/env node`，$out/bin/pi-web-ui 又指向不可执行文件，`nix run .#`
+      # 直接报 "Permission denied"。故先补回可执行位，让 shebang 重写也生效。
+      chmod +x $out/lib/node_modules/pi-web-ui/bin/pi-web-ui.mjs
       patchShebangs $out/lib/node_modules/pi-web-ui/bin/pi-web-ui.mjs
       ln -s ../lib/node_modules/pi-web-ui/bin/pi-web-ui.mjs $out/bin/pi-web-ui
       runHook postInstall
