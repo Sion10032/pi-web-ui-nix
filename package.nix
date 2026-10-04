@@ -8,13 +8,13 @@
   nodejs_22,
   python3,
 }: let
-  version = "0.96.1";
+  version = "0.99.0";
 
   src = fetchFromGitHub {
     owner = "xing-shuyin";
     repo = "pi-web-ui";
     tag = "v${version}";
-    sha256 = "sha256-paDBWazGpQj3vw587xGatCwLnI3pmsEFpqHOG2UnkSE=";
+    sha256 = "sha256-GTybk+OEhGsYwa2a4EZomo3ps5RuLu6GiymUeCgafSs=";
   };
 in
   # 为什么用 pnpm 而不是 buildNpmPackage：
@@ -67,7 +67,7 @@ in
         # Linux 上 auto 本就以 hardlink 起步，store 内容不变。
         pnpm config set package-import-method hardlink
       '';
-      hash = "sha256-o+eQvX9pPFyX70lnuF+qD9r/Lh7x316HTVDSrk+9KeQ=";
+      hash = "sha256-MaX6V39wHo0c7S4vp9VMGWV7amwBmFfBfTOhSqU9G0g=";
     };
 
     nativeBuildInputs = [
