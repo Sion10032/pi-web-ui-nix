@@ -75,7 +75,12 @@ in
         # Linux 上 auto 本就以 hardlink 起步，store 内容不变。
         pnpm config set package-import-method hardlink
       '';
-      hash = "sha256-MaX6V39wHo0c7S4vp9VMGWV7amwBmFfBfTOhSqU9G0g=";
+      # 注意：更换 fetch 用的 pnpm 版本后必须用新 hash 真实构建验证
+      # （nix build --rebuild 或干净环境）。FOD 的 output store path 由
+      # (name, outputHash) 决定，沿用旧 hash 时本地 store 已有的旧输出会被
+      # 直接复用、跳过构建，造成“hash 兼容”的假绿——pnpm_11 首次引入时就
+      # 是这样被误判为无需重算的。
+      hash = "sha256-CFHUWS5b2jJxOwdcMWrYJHGBVH0/YdnwAyNc9lRoCvY=";
     };
 
     nativeBuildInputs = [
