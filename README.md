@@ -145,6 +145,7 @@ Common options (all three modules; prefix with `services.pi-web-ui.`):
 | `dataDir` | str | `"~/.local/state/pi-web-ui"` | Data directory; `~` prefix is expanded to the service user's home (`PI_WEB_DATA_DIR`). |
 | `engine` | enum `["pi" "dsh"]` | `"pi"` | Agent engine to drive (`PI_WEB_ENGINE`). |
 | `allowOrigins` | listOf str | `[]` | Extra allowed CORS origins, comma-joined (`PI_WEB_ALLOW_ORIGINS`). |
+| `allowHosts` | listOf str | `[]` | Hostname allowlist for the Host-header guard, comma-joined (`PI_WEB_ALLOW_HOSTS`) — needed behind a reverse proxy forwarding a public-domain Host. Strict mode: once non-empty, the loopback/private-LAN fallback no longer applies, so also list `localhost` / LAN addresses you still use. |
 | `codingAgentDir` | nullOr str | `null` | pi config dir if not the default `~/.pi/agent` (`PI_CODING_AGENT_DIR`). |
 | `environment` | attrsOf str | `{}` | Extra environment variables for the service (escape hatch). |
 | `extraArgs` | listOf str | `[]` | Extra CLI arguments appended to pi-web-ui (the service always passes `--no-browser`). |

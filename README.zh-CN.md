@@ -143,6 +143,7 @@ home-manager 以用户身份运行，管不了主机防火墙，因此本模块�
 | `dataDir` | str | `"~/.local/state/pi-web-ui"` | 数据目录；`~` 前缀展开为服务用户的 home（`PI_WEB_DATA_DIR`）。 |
 | `engine` | enum `["pi" "dsh"]` | `"pi"` | 驱动的代理引擎（`PI_WEB_ENGINE`）。 |
 | `allowOrigins` | listOf str | `[]` | 额外允许的 CORS 来源，逗号拼接（`PI_WEB_ALLOW_ORIGINS`）。 |
+| `allowHosts` | listOf str | `[]` | Host 头白名单的 hostname 列表，逗号拼接（`PI_WEB_ALLOW_HOSTS`）——反向代理转发公网域名 Host 时必填。严格模式：非空后回环/私网兜底失效，仍需本机/局域网直连的要把对应条目一并列入。 |
 | `codingAgentDir` | nullOr str | `null` | pi 配置目录，非默认 `~/.pi/agent` 时指定（`PI_CODING_AGENT_DIR`）。 |
 | `environment` | attrsOf str | `{}` | 服务的额外环境变量（逃生口）。 |
 | `extraArgs` | listOf str | `[]` | 追加到 pi-web-ui 的额外 CLI 参数（服务始终传入 `--no-browser`）。 |

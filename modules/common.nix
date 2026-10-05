@@ -16,6 +16,9 @@ in
     })
     // (
       if cfg.allowOrigins == [ ] then { } else { PI_WEB_ALLOW_ORIGINS = lib.concatStringsSep "," cfg.allowOrigins; }
+    )
+    // (
+      if cfg.allowHosts == [ ] then { } else { PI_WEB_ALLOW_HOSTS = lib.concatStringsSep "," cfg.allowHosts; }
     );
 
   piWebUiArgs = cfg: [ "--no-browser" ] ++ cfg.extraArgs;
@@ -62,6 +65,21 @@ in
       type = types.listOf types.str;
       default = [ ];
       description = "Extra allowed CORS origins, comma-joined (PI_WEB_ALLOW_ORIGINS).";
+    };
+
+    allowHosts = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = ''
+        Hostname allowlist for the Host-header guard, comma-joined
+        (PI_WEB_ALLOW_HOSTS). Needed when reaching the service through a
+        reverse proxy that forwards a non-loopback/non-private-LAN Host
+        (e.g. a public domain).
+
+        Strict mode: once non-empty, only listed hostnames pass and the
+        loopback/private-LAN fallback no longer applies — add localhost and
+        any LAN addresses you still use to the list.
+      '';
     };
 
     codingAgentDir = mkOption {
