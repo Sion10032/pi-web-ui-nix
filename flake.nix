@@ -51,7 +51,9 @@
         default = pkgs.mkShell {
           packages = with pkgs; [
             nodejs_22
-            pnpm # 重新生成 pnpm-lock.yaml（pnpm import）用
+            # 重新生成 pnpm-lock.yaml（pnpm import）用。与 package.nix 钉同一
+            # 版本：lockfile 的生产者与 FOD fetcher 的消费者不能漂移
+            pnpm_11
             nixfmt-rfc-style
           ];
         };

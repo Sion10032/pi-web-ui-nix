@@ -198,8 +198,8 @@ $ nix run .#update-dev-private-narHash
 
 2. 从新 tag 重新生成 `pnpm-lock.yaml`（脚本会下载该 tag 的 `package.json`
    与 `package-lock.json` 并执行 `pnpm import` —— 版本忠实保留，缺失的
-   integrity 由 registry 元数据补齐；PATH 里没有 pnpm 时自动回退到
-   `nix develop` 中 pin 住的 `pnpm_12`）：
+   integrity 由 registry 元数据补齐；脚本始终在 `nix develop` 内运行，
+   用 pin 住的 `pnpm_11` 生成 lockfile）：
 
    ```console
    $ ./dev/update-pnpm-lock.sh
@@ -228,8 +228,15 @@ URL 却没有 `integrity` 字段。npm 对带 shrinkwrap 的依赖子树会原�
 保留）。若上游某天修复或去掉该 shrinkwrap，迁回 `buildNpmPackage` 并非
 难事。
 
-`package.nix` 里内置的两个 pnpm 相关处理：
+`package.nix` 里内置的三个 pnpm 相关处理：
 
+- 钉住的 `pnpm_11`（fetcher 与 devShell 一致）：deps hash 绑定 fetch 时
+  所用的 pnpm 版本；top-level `pnpm` 随 unstable 滚动（任意 minor bump
+  都可能改变 store 内容、打破 hash），版本化别名基本冻结 —— 下游用
+  `follows` 覆盖本 flake 的 `nixpkgs` 输入时仍能命中同一 hash。devShell
+  同钉一版，保证 `pnpm import`（lockfile 生产者）与 fetcher（消费者）不
+  漂移；`dev/update-pnpm-lock.sh` 始终在 `nix develop` 内执行以强制这
+  一点。nixpkgs 移除 `pnpm_11` 时迁移到当时的别名并重算 hash。
 - `prePnpmInstall` 中的 `pnpm config set minimum-release-age 0`：pnpm ≥ 12
   默认拒绝发布时间早于某阈值的包；本仓库经常打包上游发布仅一天的版本，
   且由冻结、经审的 lockfile 钉住，故对 fetcher 显式放宽该策略。

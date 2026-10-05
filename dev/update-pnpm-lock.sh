@@ -16,15 +16,15 @@ if [ -z "${VERSION:-}" ]; then
   exit 1
 fi
 
-# pnpm 不在 PATH 时，用仓库 devShell（内含 pin 住的 pnpm_12）重跑本脚本
-if ! command -v pnpm >/dev/null 2>&1; then
-  if [ -n "${IN_DEV_SHELL:-}" ]; then
-    echo "错误：devShell 中也没有 pnpm" >&2
-    exit 1
-  fi
-  echo "pnpm 不在 PATH，切换到 nix devShell 重新执行…" >&2
+# 无条件在仓库 devShell 内运行：pnpm import（lockfile 生产者）必须与
+# package.nix FOD 钉住的 pnpm_11 同版本，避免 PATH 上的其他 pnpm 生成该
+# 版本读不了的 lockfile。本仓库升级流程本就依赖 nix（迭代 hash 等），
+# 故不提供绕过 devShell 的路径。
+if [ -z "${IN_DEV_SHELL:-}" ]; then
+  echo "切换到 nix devShell（pin 住的 pnpm_11）内重新执行…" >&2
   exec nix develop "$ROOT" -c env IN_DEV_SHELL=1 bash "$0" "$@"
 fi
+command -v pnpm >/dev/null 2>&1 || { echo "错误：devShell 中没有 pnpm" >&2; exit 1; }
 
 BASE="https://raw.githubusercontent.com/xing-shuyin/pi-web-ui/v${VERSION}"
 TMP=$(mktemp -d)

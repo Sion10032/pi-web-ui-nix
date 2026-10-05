@@ -202,8 +202,8 @@ $ nix run .#update-dev-private-narHash
 2. Regenerate `pnpm-lock.yaml` from the new tag (the script downloads the
    tag's `package.json` + `package-lock.json` and runs `pnpm import` —
    versions imported verbatim, missing integrities filled from registry
-   metadata; falls back to the pinned `pnpm_12` from `nix develop` if pnpm
-   is not on `PATH`):
+   metadata; it always runs inside `nix develop` so the pinned `pnpm_11`
+   produces the lockfile):
 
    ```console
    $ ./dev/update-pnpm-lock.sh
@@ -236,8 +236,17 @@ shrinkwraps, and `pnpm import` converts upstream's `package-lock.json` into
 (versions preserved verbatim). If upstream ever fixes or drops that
 shrinkwrap, migrating back to `buildNpmPackage` would be straightforward.
 
-Two pnpm-specific notes baked into `package.nix`:
+Three pnpm-specific notes baked into `package.nix`:
 
+- the pinned `pnpm_11` (fetcher and devShell alike): the deps hash is tied
+  to the pnpm version that fetched it; top-level `pnpm` rolls with unstable
+  (any minor bump can change the store and break the hash), while the
+  versioned alias is effectively frozen — consumers overriding this flake's
+  `nixpkgs` input (`follows`) still hit the same hash. Pinning the devShell
+  too keeps `pnpm import` (lockfile producer) and the fetcher (consumer) on
+  the same version; `dev/update-pnpm-lock.sh` always runs inside `nix develop`
+  to enforce it. When nixpkgs eventually drops `pnpm_11`, migrate to the
+  then-current alias and re-hash.
 - `pnpm config set minimum-release-age 0` in `prePnpmInstall`: pnpm ≥ 12 by
   default rejects packages published more recently than a cutoff; this repo
   often packages day-old upstream releases pinned by a frozen, reviewed

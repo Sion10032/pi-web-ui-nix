@@ -3,7 +3,7 @@
   stdenv,
   fetchFromGitHub,
   fetchPnpmDeps,
-  pnpm,
+  pnpm_11,
   pnpmConfigHook,
   nodejs_22,
   python3,
@@ -49,6 +49,14 @@ in
       inherit (finalAttrs) src;
       inherit (finalAttrs) postPatch;
       fetcherVersion = 4;
+      # FOD 的输出 hash 绑定 fetch 时的 pnpm 版本：top-level pnpm 随 unstable
+      # 滚动，任意 minor bump 都可能改变 store 物化内容、打破 hash；而版本化
+      # 别名 pnpm_11 在 nixpkgs 里基本冻结（仅手动 PR 更新），钉住它可在下游
+      # 用 follows 覆盖本 flake 的 nixpkgs 输入时仍命中同一 hash。需与下方
+      # nativeBuildInputs 的 pnpm_11 保持同版本，避免 store/state.db 跨版本互操作。
+      pnpm = pnpm_11;
+      # 以下 prePnpmInstall 两项是 pnpm ≥ 12 的防御性配置，在 pnpm_11 下为
+      # no-op，保留以便将来切回 top-level pnpm 时不重新踩坑。
       # pnpm ≥ 12 默认启用 minimumReleaseAge 供应链策略，会拒绝发布不足 N 小时的包；
       # 本项目依赖上游发布当天即打包，而 pnpm-lock.yaml 是 git 内版本冻结、经
       # review 的产物，策略针对的浮动解析风险不适用，故显式关闭。
@@ -71,7 +79,7 @@ in
     };
 
     nativeBuildInputs = [
-      pnpm
+      pnpm_11
       pnpmConfigHook
       nodejs_22 # build 脚本内部链式调用 npm run build:web 等
       python3 # node-gyp（node-pty 原生编译）
