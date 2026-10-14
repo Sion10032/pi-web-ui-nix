@@ -195,25 +195,73 @@ $ nix run .#update-dev-private-narHash
 
 ## 升级到新上游版本
 
-1. 编辑 `package.nix`：修改 `let version = "…";` 绑定中的版本号。
+常规情况下不需要手工做这件事：[`.github/workflows/update.yml`](./.github/workflows/update.yml)
+每天定时（也可手动触发）跑 `dev/upgrade.sh` 并开出 PR。本地跑脚本用于修复
+半途失败的升级，或验证对脚本本身的改动。
 
-2. 从新 tag 重新生成 `pnpm-lock.yaml`（脚本会下载该 tag 的 `package.json`
-   与 `package-lock.json` 并执行 `pnpm import` —— 版本忠实保留，缺失的
-   integrity 由 registry 元数据补齐；脚本始终在 `nix develop` 内运行，
-   用 pin 住的 `pnpm_11` 生成 lockfile）：
+```console
+$ ./dev/upgrade.sh
+```
+
+一条命令升到上游最新 tag，并一直迭代到构建全绿。脚本做的事：
+
+1. 用 `git ls-remote` 探测最新 semver tag，写回 `package.nix` 的
+   `let version = "…"` 绑定；
+2. 调用 `dev/update-pnpm-lock.sh` 从该 tag 重新生成 `pnpm-lock.yaml`
+   （版本忠实保留、缺失 integrity 由 registry 元数据补齐；始终在
+   `nix develop` 内用 pin 住的 `pnpm_11` 生成）；
+3. 把两个 FOD hash 先置为 `lib.fakeHash`，再逐轮从 nix 的 mismatch 报错里
+   解析 `got: sha256-…` 写回（先重置的原因见下方「热 store 陷阱」）；
+4. 遇到 `ERR_PNPM_IGNORED_BUILDS` 时，把报错里的包名并入 `allowBuilds`；
+5. 修复幽灵依赖：出现 `TS2307 Cannot find module 'X'` 且 `X` 在 lockfile 里时，
+   把 `X` 的 scope 加进 `publicHoistPattern` 后重试（同一模块二次失败即中止，
+   不会死循环）；
+6. 验证：`nix run .# -- --version` 必须输出新版本，`nix flake check -L`
+   必须通过（NixOS VM 测试 + home-manager）。
+
+`allowBuilds` / `publicHoistPattern` 放在仓库跟踪的
+[`pnpm-workspace.yaml`](./pnpm-workspace.yaml) 里，由 `postPatch` 拷进上游源码树 ——
+脚本改的是这个数据文件，而不是 Nix 源码。两项都是安装期配置，**从不进入
+`pnpm-lock.yaml`**；lockfile 变动只因依赖版本变了。
+
+提交与推送仍留给人工（脚本只打印 diff stat，从不碰 git 历史）。中途失败
+直接重跑即可：脚本幂等，会从当前状态继续。
+
+### CI 里的同一套流程
+
+[`.github/workflows/update.yml`](./.github/workflows/update.yml) 每天定时
+（也可手动触发）跑同一个脚本并开 PR —— hash / allowBuilds / 幽灵依赖的迭代
+逻辑只有这一份实现，不会出现两处逻辑漂移。它用 `UPGRADE_TARGET_VERSION`
+透传目标版本（手动触发的 version 输入就是靠它生效），并用 `--no-flake-check`
+把全量验证留给 PR 上的 `ci.yml`。
+
+### 手工流程
+
+脚本修不了、或需要 review 时用：
+
+1. 改 `package.nix` 里 `let version = "…"` 绑定的版本号。
+
+2. 重新生成 lockfile：
 
    ```console
    $ ./dev/update-pnpm-lock.sh
    ```
 
-3. 按惯例迭代两个 hash（`nix build .#pi-web-ui -L`，把 mismatch 报错里的
+3. 迭代两个 hash（`nix build .#pi-web-ui -L`，把 mismatch 报错里的
    `got: sha256-…` 逐个抄回 `package.nix`）：先 `src`，后 `pnpmDeps.hash`。
 
+   热 store 陷阱：FOD 输出路径由 `(name, outputHash)` 决定，旧 hash 原封
+   不动时 nix 会直接复用 store 里已有的旧输出、不报 mismatch —— 若构建
+   报出与上一个版本有关的诡异错误（如 `ERR_PNPM_OUTDATED_LOCKFILE` 列出
+   新版已不存在的依赖），说明旧 `src` 输出被静默复用了。把旧 hash 改成
+   `lib.fakeHash` 强制重 fetch，即可拿到真实的 `got:` 值（`upgrade.sh`
+   开头就是这么做的）。
+
 4. 若构建报 `ERR_PNPM_IGNORED_BUILDS`，把报错列出的包名加入
-   `package.nix` 中 `postPatch` 写入的 `allowBuilds` 映射。
+   `pnpm-workspace.yaml` 的 `allowBuilds` 映射。
 
 5. 验证：`nix run .# -- --version` 应输出新版本号，`nix flake check -L`
-   应仍然通过（它会重建 NixOS VM 测试与 home-manager activation 检查）。
+   应仍然通过。
 
 ## 故障排查
 
@@ -229,7 +277,7 @@ URL 却没有 `integrity` 字段。npm 对带 shrinkwrap 的依赖子树会原�
 保留）。若上游某天修复或去掉该 shrinkwrap，迁回 `buildNpmPackage` 并非
 难事。
 
-`package.nix` 里内置的三个 pnpm 相关处理：
+四个 pnpm 相关处理：
 
 - 钉住的 `pnpm_11`（fetcher 与 devShell 一致）：deps hash 绑定 fetch 时
   所用的 pnpm 版本；top-level `pnpm` 随 unstable 滚动（任意 minor bump
@@ -241,10 +289,25 @@ URL 却没有 `integrity` 字段。npm 对带 shrinkwrap 的依赖子树会原�
 - `prePnpmInstall` 中的 `pnpm config set minimum-release-age 0`：pnpm ≥ 12
   默认拒绝发布时间早于某阈值的包；本仓库经常打包上游发布仅一天的版本，
   且由冻结、经审的 lockfile 钉住，故对 fetcher 显式放宽该策略。
-- `allowBuilds`：pnpm ≥ 11 要求显式批准依赖的构建脚本（`node-pty` 的
-  node-gyp 编译、esbuild 等）。注意 `onlyBuiltDependencies` 是 v11 之前
-  的旧写法，已被移除 —— pnpm ≥ 11 仍能从配置读到它，但没有任何代码
-  会执行它。
+- [`pnpm-workspace.yaml`](./pnpm-workspace.yaml)（本仓库跟踪，由 `postPatch`
+  拷进上游源码树）：pnpm ≥ 10 起 pnpm 专属配置必须写在这个文件里（`.npmrc`
+  里的同名键会被静默忽略），而上游用 npm 开发、不提供该文件。下面两项补的
+  都是「npm 能过、pnpm 不过」的差异；升级时由 `dev/upgrade.sh` 自动维护。
+  - `allowBuilds`：pnpm ≥ 11 要求显式批准依赖的构建脚本（`node-pty` 的
+    node-gyp 编译、esbuild 等）；默认 `strictDepBuilds=true` 会让未批准的
+    脚本直接变成 install 硬失败，键名取自 `ERR_PNPM_IGNORED_BUILDS` 的
+    `Ignored build scripts:` 列表。（`onlyBuiltDependencies` 是 v11 之前的
+    旧写法，pnpm ≥ 11 读得到但不会执行。）
+  - `publicHoistPattern: ["@earendil-works/*"]`：v0.105.x 起 server 代码
+    直接 import `@earendil-works/pi-tui`（`server/virtual-tui.ts`、
+    `server/webui-context.ts`），但上游 `package.json` 从未声明它 —— pi-tui
+    只是 pi-coding-agent 的传递依赖。上游 CI 用 npm 安装：扁平
+    `node_modules` 会把传递依赖 hoist 到顶层，幽灵 import 恰好能解析；
+    pnpm 的隔离布局下根 `node_modules` 只链接 importers 声明的包，tsc 报
+    TS2307。把整个 `@earendil-works` 命名空间公开提升到根目录可恢复
+    npm 等价的解析语义，也覆盖未来同命名空间的新幽灵 import。hoisting
+    是安装期布局行为，从不进入 `pnpm-lock.yaml`，因此
+    `update-pnpm-lock.sh` 无需改动。
 
 ### nix-darwin `launchd.agents` schema 变更（unstable / 26.11）
 

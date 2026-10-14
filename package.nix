@@ -32,16 +32,12 @@ in
 
     postPatch = ''
       cp ${./pnpm-lock.yaml} pnpm-lock.yaml
-      # pnpm ≥11 用 allowBuilds 映射批准依赖的构建脚本（onlyBuiltDependencies 已废弃）；
-      # 键名来自 ERR_PNPM_IGNORED_BUILDS 提示，上游依赖变化时按新提示更新（见 README 升级流程）
-      cat > pnpm-workspace.yaml <<'YAML'
-      allowBuilds:
-        "@google/genai": true
-        electron-winstaller: true
-        esbuild: true
-        node-pty: true
-        protobufjs: true
-      YAML
+      # allowBuilds / publicHoistPattern 放在仓库根的 pnpm-workspace.yaml，由
+      # dev/upgrade.sh 自动维护（为什么需要这两项、键名从哪来，见该文件内注释
+      # 与 README 故障排查）。pnpm ≥10 起 pnpm 专属配置必须写在
+      # pnpm-workspace.yaml（.npmrc 里的同名键会被静默忽略）；两项都是安装期
+      # 行为、不进 lockfile，故升级时无需改动 dev/update-pnpm-lock.sh。
+      cp ${./pnpm-workspace.yaml} pnpm-workspace.yaml
     '';
 
     pnpmDeps = fetchPnpmDeps {

@@ -32,8 +32,11 @@ trap 'rm -rf "$TMP"' EXIT
 
 echo "==> pi-web-ui v${VERSION}（pnpm $(pnpm --version)）"
 echo "==> 下载上游 package.json / package-lock.json"
-curl -fsSL -o "$TMP/package.json" "$BASE/package.json"
-curl -fsSL -o "$TMP/package-lock.json" "$BASE/package-lock.json"
+# --retry-all-errors 才会重试 TLS/SSL 类错误（实测 GitHub 会偶发
+# "TLS connect error: unexpected eof while reading"）；网络抖动不该让夜间
+# 升级任务静默失败
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$TMP/package.json" "$BASE/package.json"
+curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$TMP/package-lock.json" "$BASE/package-lock.json"
 
 echo "==> pnpm import"
 (cd "$TMP" && pnpm import)

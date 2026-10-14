@@ -1,0 +1,30 @@
+# pnpm 安装期配置：package.nix 的 postPatch 会把它原样拷进上游源码树。
+#
+# 上游用 npm 开发与测试，源码树里没有这个文件；而下面两项补的恰好都是
+# 「npm 能过、pnpm 不过」的差异，所以必须随包携带。
+#
+# allowBuilds
+#   pnpm ≥11 默认 strictDepBuilds=true，未显式批准的依赖构建脚本会让
+#   pnpm install 直接失败（node-pty 的 node-gyp 编译、esbuild 等）。
+#   键名取自 ERR_PNPM_IGNORED_BUILDS 的 "Ignored build scripts:" 列表。
+#   （onlyBuiltDependencies 是 v11 之前的旧写法，pnpm ≥11 读得到但不会执行。）
+#
+# publicHoistPattern
+#   上游代码 import 未声明的传递依赖（幽灵依赖）时：npm 的扁平 node_modules 会把
+#   传递依赖 hoist 到顶层所以能解析，而 pnpm 的隔离布局下根 node_modules 只链接
+#   importers 声明的包，tsc 报 TS2307。把对应 scope 公开提升到根 node_modules
+#   即可对齐 npm 的解析语义。v0.105.x 起 server 代码直接 import
+#   @earendil-works/pi-tui（server/virtual-tui.ts、server/webui-context.ts），
+#   而它只是 pi-coding-agent 的传递依赖，上游 package.json 从未声明。
+#
+# 注意：pnpm ≥10 起 pnpm 专属配置必须写在 pnpm-workspace.yaml（.npmrc 里的
+# 同名键会被静默忽略）；两项都是安装期行为、不进 pnpm-lock.yaml，所以升级时
+# 无需改动 dev/update-pnpm-lock.sh。
+allowBuilds:
+  "@google/genai": true
+  electron-winstaller: true
+  esbuild: true
+  node-pty: true
+  protobufjs: true
+publicHoistPattern:
+  - "@earendil-works/*"

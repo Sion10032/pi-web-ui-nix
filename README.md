@@ -198,29 +198,83 @@ $ nix run .#update-dev-private-narHash
 
 ## Upgrading to a new upstream version
 
-1. Edit `package.nix`: change the version in the `let version = "…"` binding.
+Normally you do not do this by hand: [`.github/workflows/update.yml`](./.github/workflows/update.yml)
+runs `dev/upgrade.sh` nightly (and on manual dispatch) and opens a PR with the
+result. Run the script locally to repair a half-finished upgrade or to test a
+change to it.
 
-2. Regenerate `pnpm-lock.yaml` from the new tag (the script downloads the
-   tag's `package.json` + `package-lock.json` and runs `pnpm import` —
-   versions imported verbatim, missing integrities filled from registry
-   metadata; it always runs inside `nix develop` so the pinned `pnpm_11`
-   produces the lockfile):
+```console
+$ ./dev/upgrade.sh
+```
+
+That single command upgrades to the latest upstream tag and does not stop
+until the build is green. It:
+
+1. detects the newest semver tag via `git ls-remote` and writes it into the
+   `let version = "…"` binding in `package.nix`;
+2. runs `dev/update-pnpm-lock.sh` to regenerate `pnpm-lock.yaml` from that
+   tag (versions imported verbatim, missing integrities filled from registry
+   metadata; always inside `nix develop` so the pinned `pnpm_11` produces it);
+3. resets both FOD hashes to `lib.fakeHash` and then iterates them from the
+   `got: sha256-…` values in nix's mismatch errors (see the warm-store caveat
+   below for why the reset comes first);
+4. merges newly reported packages into `allowBuilds` when pnpm fails with
+   `ERR_PNPM_IGNORED_BUILDS`;
+5. repairs ghost imports: on `TS2307 Cannot find module 'X'`, if `X` is in the
+   lockfile it adds `X`'s scope to `publicHoistPattern` and retries (a module
+   that fails twice aborts instead of looping);
+6. verifies the result: `nix run .# -- --version` must print the new version
+   and `nix flake check -L` must pass (NixOS VM test + home-manager).
+
+`allowBuilds` / `publicHoistPattern` live in the tracked
+[`pnpm-workspace.yaml`](./pnpm-workspace.yaml), which `postPatch` copies into
+upstream's source tree — the script edits that data file rather than Nix
+source. Both settings are install-time only and never appear in
+`pnpm-lock.yaml`; the lockfile changes only because dependency versions did.
+
+Committing and pushing stay manual (the script prints the diff stat and never
+touches git history). If a run dies mid-way, just run it again: it is
+idempotent and picks up from wherever the tree is.
+
+### In CI
+
+[`.github/workflows/update.yml`](./.github/workflows/update.yml) runs this same
+script nightly (and on manual dispatch) and opens a PR with the result — the
+hash / `allowBuilds` / ghost-import loop exists in exactly one place, so there
+is no second implementation to drift out of sync. It passes the resolved target
+via `UPGRADE_TARGET_VERSION` (which is how the manual dispatch input can pick a
+specific tag) plus `--no-flake-check`, leaving the full `nix flake check` to
+`ci.yml` on the PR.
+
+### Doing it by hand
+
+Useful when the script cannot repair something, or for review:
+
+1. Edit the version in the `let version = "…"` binding in `package.nix`.
+
+2. Regenerate the lockfile:
 
    ```console
    $ ./dev/update-pnpm-lock.sh
    ```
 
-3. Iterate the two hashes the usual way (`nix build .#pi-web-ui -L`, copy
-   each `got: sha256-…` from the mismatch errors back into `package.nix`):
-   first `src`, then `pnpmDeps.hash`.
+3. Iterate the two hashes (`nix build .#pi-web-ui -L`, copy each
+   `got: sha256-…` from the mismatch errors back into `package.nix`): first
+   `src`, then `pnpmDeps.hash`.
+
+   Warm-store caveat: FOD output paths are keyed by `(name, outputHash)`, so
+   with an unchanged old hash nix happily reuses the stale store path instead
+   of surfacing a mismatch — if the build fails with puzzling errors about a
+   *previous* version (e.g. `ERR_PNPM_OUTDATED_LOCKFILE` naming deps the new
+   release doesn't have), the old `src` output got silently reused. Set the
+   stale hash to `lib.fakeHash` to force a refetch and get the real `got:`
+   value (this is what `upgrade.sh` does up front).
 
 4. If the build fails with `ERR_PNPM_IGNORED_BUILDS`, copy the package names
-   from the error into the `allowBuilds` map written by `postPatch` in
-   `package.nix`.
+   from the error into the `allowBuilds` map in `pnpm-workspace.yaml`.
 
 5. Verify: `nix run .# -- --version` should print the new version, and
-   `nix flake check -L` should still pass (it rebuilds the NixOS VM test and
-   the home-manager activation check).
+   `nix flake check -L` should still pass.
 
 ## Troubleshooting
 
@@ -237,7 +291,7 @@ shrinkwraps, and `pnpm import` converts upstream's `package-lock.json` into
 (versions preserved verbatim). If upstream ever fixes or drops that
 shrinkwrap, migrating back to `buildNpmPackage` would be straightforward.
 
-Three pnpm-specific notes baked into `package.nix`:
+Four pnpm-specific notes:
 
 - the pinned `pnpm_11` (fetcher and devShell alike): the deps hash is tied
   to the pnpm version that fetched it; top-level `pnpm` rolls with unstable
@@ -252,10 +306,30 @@ Three pnpm-specific notes baked into `package.nix`:
   default rejects packages published more recently than a cutoff; this repo
   often packages day-old upstream releases pinned by a frozen, reviewed
   lockfile, so the policy is explicitly relaxed for the fetcher.
-- `allowBuilds`: pnpm ≥ 11 requires explicit approval for dependency build
-  scripts (`node-pty`'s node-gyp compile, esbuild, …). Note that
-  `onlyBuiltDependencies` is the removed pre-v11 spelling — pnpm ≥ 11 reads
-  it from config but nothing acts on it.
+- [`pnpm-workspace.yaml`](./pnpm-workspace.yaml) (tracked in this repo,
+  copied into upstream's source tree by `postPatch`): pnpm ≥ 10 requires
+  pnpm-specific settings to live in that file — the same-named key in
+  `.npmrc` is silently ignored — and upstream ships no such file because it
+  develops with npm. Both entries below patch over differences npm tolerates
+  and pnpm does not. `dev/upgrade.sh` maintains the file automatically.
+  - `allowBuilds`: pnpm ≥ 11 requires explicit approval for dependency build
+    scripts (`node-pty`'s node-gyp compile, esbuild, …); the default
+    `strictDepBuilds=true` turns unapproved scripts into a hard install
+    failure, and the key names come from the `Ignored build scripts:` list in
+    `ERR_PNPM_IGNORED_BUILDS`. (`onlyBuiltDependencies` is the removed pre-v11
+    spelling — pnpm ≥ 11 reads it from config but nothing acts on it.)
+  - `publicHoistPattern: ["@earendil-works/*"]`: since v0.105.x the server
+    code imports `@earendil-works/pi-tui` directly (`server/virtual-tui.ts`,
+    `server/webui-context.ts`), yet upstream's `package.json` never declares
+    it — `pi-tui` is only a transitive dependency of `pi-coding-agent`.
+    Upstream CI installs with npm, whose flat `node_modules` hoists transitive
+    deps to the top level, so the ghost import happens to resolve there; under
+    pnpm's isolated layout the root `node_modules` only links
+    importer-declared packages, and `tsc` fails with TS2307. Hoisting the whole
+    `@earendil-works` namespace to the public root restores npm-equivalent
+    resolution semantics and also covers future ghost imports from the same
+    namespace. Hoisting is an install-time layout concern, so it never appears
+    in `pnpm-lock.yaml` — no `update-pnpm-lock.sh` changes needed.
 
 ### nix-darwin `launchd.agents` schema change (unstable / 26.11)
 
