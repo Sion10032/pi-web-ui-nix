@@ -68,16 +68,17 @@
       });
 
       checks = eachSystem ({ pkgs, system, ... }:
+        let
+          homeManagerActivation = checkFile:
+            (privateInputs.home-manager.lib.homeManagerConfiguration {
+              inherit pkgs;
+              modules = [ checkFile ];
+              extraSpecialArgs = { inherit self; };
+            }).activation-script;
+        in
         {
-          home-manager =
-            let
-              homeConfiguration = privateInputs.home-manager.lib.homeManagerConfiguration {
-                inherit pkgs;
-                modules = [ ./checks/pi-web-ui/home-manager.nix ];
-                extraSpecialArgs = { inherit self; };
-              };
-            in
-            homeConfiguration.activation-script;
+          home-manager = homeManagerActivation ./checks/pi-web-ui/home-manager.nix;
+          home-manager-pi-web = homeManagerActivation ./checks/pi-web/home-manager.nix;
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           nixos-test = pkgs.callPackage ./checks/pi-web-ui/nixos-test.nix { inherit self; };
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
@@ -92,12 +93,34 @@
               };
             in
             darwinConfiguration.config.system.build.toplevel;
+          darwin-pi-web =
+            let
+              darwinConfiguration = privateInputs.nix-darwin.lib.darwinSystem {
+                modules = [
+                  ./checks/pi-web/darwin.nix
+                  { nixpkgs.hostPlatform = system; }
+                ];
+                specialArgs = { inherit self; };
+              };
+            in
+            darwinConfiguration.config.system.build.toplevel;
         });
 
       nixosModules = rec {
         pi-web-ui = { lib, pkgs, ... }: {
           imports = [ ./modules/pi-web-ui/nixos.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
+        };
+        pi-web = { lib, pkgs, ... }: {
+          imports = [ ./modules/pi-web/nixos.nix ];
+          services.pi-web.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web;
+        };
+        # 两包同机并存时只需 import 一个模块；副作用仅是声明了两套 options
+        all = {
+          imports = [
+            pi-web-ui
+            pi-web
+          ];
         };
         default = pi-web-ui;
       };
@@ -107,6 +130,16 @@
           imports = [ ./modules/pi-web-ui/home-manager.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
         };
+        pi-web = { lib, pkgs, ... }: {
+          imports = [ ./modules/pi-web/home-manager.nix ];
+          services.pi-web.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web;
+        };
+        all = {
+          imports = [
+            pi-web-ui
+            pi-web
+          ];
+        };
         default = pi-web-ui;
       };
 
@@ -114,6 +147,16 @@
         pi-web-ui = { lib, pkgs, ... }: {
           imports = [ ./modules/pi-web-ui/darwin.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
+        };
+        pi-web = { lib, pkgs, ... }: {
+          imports = [ ./modules/pi-web/darwin.nix ];
+          services.pi-web.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web;
+        };
+        all = {
+          imports = [
+            pi-web-ui
+            pi-web
+          ];
         };
         default = pi-web-ui;
       };
