@@ -35,6 +35,7 @@
     {
       overlays.default = final: prev: {
         pi-web-ui = final.callPackage ./packages/pi-web-ui/package.nix { };
+        pi-web = final.callPackage ./packages/pi-web/package.nix { };
       };
 
       apps = eachSystem ({ pkgs, ... }: {
@@ -62,6 +63,7 @@
 
       packages = eachSystem ({ pkgs, system, ... }: {
         pi-web-ui = pkgs.callPackage ./packages/pi-web-ui/package.nix { };
+        pi-web = pkgs.callPackage ./packages/pi-web/package.nix { };
         default = self.packages.${system}.pi-web-ui;
       });
 
