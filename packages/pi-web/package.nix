@@ -5,10 +5,10 @@
   buildNpmPackage,
   fetchFromGitHub,
   nodejs_22,
-  python3,
   curl,
   cacert,
-}: let
+}:
+let
   version = "0.13.0";
 
   src = fetchFromGitHub {
@@ -31,89 +31,86 @@
   # 并让构建硬失败，需要人工重新固定。
   notoFontsCssUrl = "https://fonts.googleapis.com/css2?family=Noto+Sans+Mono:wght@100..900&display=swap";
 
-  notoSansMonoFonts =
-    stdenvNoCC.mkDerivation {
-      pname = "noto-sans-mono-woff2";
-      version = "v37";
-      # 递归 hash：输出是一个目录（CSS + 若干 woff2），不是单个文件
-      outputHashMode = "recursive";
-      outputHashAlgo = "sha256";
-      outputHash = "sha256-x33I3s8poqNn/eB0tze/ej1fZS9ikj8YS+M/DDSCKJ8=";
+  notoSansMonoFonts = stdenvNoCC.mkDerivation {
+    pname = "noto-sans-mono-woff2";
+    version = "v37";
+    # 递归 hash：输出是一个目录（CSS + 若干 woff2），不是单个文件
+    outputHashMode = "recursive";
+    outputHashAlgo = "sha256";
+    outputHash = "sha256-x33I3s8poqNn/eB0tze/ej1fZS9ikj8YS+M/DDSCKJ8=";
 
-      nativeBuildInputs = [
-        curl
-        cacert
-      ];
+    nativeBuildInputs = [
+      curl
+      cacert
+    ];
 
-      # 固定 Chrome 的 UA：Google 按 UA 决定返回的字体格式，只有现代 UA 才给 woff2
-      buildCommand = ''
-        mkdir -p $out
-        curl -fsSL \
-          -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36' \
-          '${notoFontsCssUrl}' -o $out/fonts.css
-        grep -o 'https://fonts\.gstatic\.com/[^)]*' $out/fonts.css | sort -u | while IFS= read -r url; do
-          curl -fsSL "$url" -o "$out/$(basename "$url")"
-        done
-        [ "$(find $out -name '*.woff2' | wc -l)" -gt 0 ]
-      '';
-    };
+    # 固定 Chrome 的 UA：Google 按 UA 决定返回的字体格式，只有现代 UA 才给 woff2
+    buildCommand = ''
+      mkdir -p $out
+      curl -fsSL \
+        -H 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36' \
+        '${notoFontsCssUrl}' -o $out/fonts.css
+      grep -o 'https://fonts\.gstatic\.com/[^)]*' $out/fonts.css | sort -u | while IFS= read -r url; do
+        curl -fsSL "$url" -o "$out/$(basename "$url")"
+      done
+      [ "$(find $out -name '*.woff2' | wc -l)" -gt 0 ]
+    '';
+  };
 in
-  # 为什么这里走 npm（pi-web-ui 被迫走 pnpm）：pi-web 锁的 @earendil-works/pi-*
-  # 1.4.0 树内 integrity 完整，fetchNpmDeps 不会 panic。上游 tag 自带
-  # package-lock.json，仓库内不存 lock 副本：升级只需改 tag + 迭代 hash，没有
-  # lock 转译环节（见 dev/pi-web/upgrade.sh）。
-  buildNpmPackage {
-    pname = "pi-web";
-    inherit version src;
-    nodejs = nodejs_22;
+# 为什么这里走 npm（pi-web-ui 被迫走 pnpm）：pi-web 锁的 @earendil-works/pi-*
+# 1.4.0 树内 integrity 完整，fetchNpmDeps 不会 panic。上游 tag 自带
+# package-lock.json，仓库内不存 lock 副本：升级只需改 tag + 迭代 hash，没有
+# lock 转译环节（见 dev/pi-web/upgrade.sh）。
+buildNpmPackage {
+  pname = "pi-web";
+  inherit version src;
+  nodejs = nodejs_22;
 
-    npmDepsHash = "sha256-j6KF0HnjNw7dCyuPJN24FNl2f2hLbwPCkCC0xsLRSVc=";
+  npmDepsHash = "sha256-j6KF0HnjNw7dCyuPJN24FNl2f2hLbwPCkCC0xsLRSVc=";
 
-    # devDependencies 里的 playwright 带 postinstall（会下载浏览器），
-    # 故所有依赖脚本先一律跳过；node-pty 的原生编译在 postBuild 定点补回。
-    npmFlags = ["--ignore-scripts"];
+  # devDependencies 里的 playwright 带 postinstall（会下载浏览器），故所有
+  # 依赖脚本一律跳过。node-pty 1.2.0-beta.15 的 tarball 自带
+  # prebuilds/<platform>/pty.node（node-gyp-build 运行时加载），无需编译；
+  # 若上游某版停发 prebuilds 或新平台缺 prebuilds，需改用
+  # `npm rebuild node-pty --ignore-scripts=false` 定点编译并补回 python3
+  # （npm rebuild 默认读 npmConfigHook 写入 .npmrc 的 ignore-scripts，
+  # 不带该 flag 时是 no-op——实测本包的 pty.node 全部来自 prebuilds，
+  # 产物中无 build/Release）。
+  npmFlags = [ "--ignore-scripts" ];
 
-    nativeBuildInputs = [python3]; # node-gyp（node-pty）
+  env.NEXT_TELEMETRY_DISABLED = "1";
 
-    env.NEXT_TELEMETRY_DISABLED = "1";
+  postPatch = ''
+    # 把 Next 的字体请求全部指到本地：CSS 内容取自 FOD 里 Google 的原样响应，
+    # 只把 gstatic URL 换成同目录下的文件名（fetchFontFile 在 mock 模式下对
+    # 以 / 开头的 URL 直接 fs.readFileSync）。
+    cat > mocked-google-fonts.js <<EOF
+    const fs = require("node:fs");
+    const css = fs
+      .readFileSync("${notoSansMonoFonts}/fonts.css", "utf8")
+      .replace(/https:\/\/fonts\.gstatic\.com\/[^)]*\/([^/)]+\.woff2)/g, (_, file) => "${notoSansMonoFonts}/" + file);
+    module.exports = { "${notoFontsCssUrl}": css };
+    EOF
+    export NEXT_FONT_GOOGLE_MOCKED_RESPONSES="$PWD/mocked-google-fonts.js"
+  '';
 
-    postPatch = ''
-      # 把 Next 的字体请求全部指到本地：CSS 内容取自 FOD 里 Google 的原样响应，
-      # 只把 gstatic URL 换成同目录下的文件名（fetchFontFile 在 mock 模式下对
-      # 以 / 开头的 URL 直接 fs.readFileSync）。
-      cat > mocked-google-fonts.js <<EOF
-      const fs = require("node:fs");
-      const css = fs
-        .readFileSync("${notoSansMonoFonts}/fonts.css", "utf8")
-        .replace(/https:\/\/fonts\.gstatic\.com\/[^)]*\/([^/)]+\.woff2)/g, (_, file) => "${notoSansMonoFonts}/" + file);
-      module.exports = { "${notoFontsCssUrl}": css };
-      EOF
-      export NEXT_FONT_GOOGLE_MOCKED_RESPONSES="$PWD/mocked-google-fonts.js"
-    '';
+  postBuild = ''
+    ${lib.optionalString stdenv.hostPlatform.isDarwin ''
+      # --ignore-scripts 跳过了上游 postinstall（bin/prepare-terminal.js），
+      # 它唯一的职责是给 macOS 的 spawn-helper 补执行位；这里等价复刻。
+      for dir in node_modules/node-pty/build/Release node_modules/node-pty/build/Debug node_modules/node-pty/prebuilds/darwin-*; do
+        if [ -f "$dir/spawn-helper" ]; then
+          chmod +x "$dir/spawn-helper"
+        fi
+      done
+    ''}
+  '';
 
-    postBuild = ''
-      # npmConfigHook 的 npm ci / npm rebuild 都带 --ignore-scripts，node-pty 的
-      # 原生模块没被编译。node-gyp 由 buildNpmPackage 通过 npm_config_node_gyp
-      # 注入，无需自己链进 .bin。放在 build 之后是因为 next.config.ts 把
-      # node-pty 列进 serverExternalPackages，webpack 不打包它，构建期用不到。
-      npm rebuild node-pty
-
-      ${lib.optionalString stdenv.hostPlatform.isDarwin ''
-        # --ignore-scripts 跳过了上游 postinstall（bin/prepare-terminal.js），
-        # 它唯一的职责是给 macOS 的 spawn-helper 补执行位；这里等价复刻。
-        for dir in node_modules/node-pty/build/Release node_modules/node-pty/build/Debug node_modules/node-pty/prebuilds/darwin-*; do
-          if [ -f "$dir/spawn-helper" ]; then
-            chmod +x "$dir/spawn-helper"
-          fi
-        done
-      ''}
-    '';
-
-    meta = {
-      description = "Web UI for the pi coding agent";
-      homepage = "https://github.com/agegr/pi-web";
-      license = lib.licenses.mit;
-      mainProgram = "pi-web";
-      platforms = lib.platforms.unix;
-    };
-  }
+  meta = {
+    description = "Web UI for the pi coding agent";
+    homepage = "https://github.com/agegr/pi-web";
+    license = lib.licenses.mit;
+    mainProgram = "pi-web";
+    platforms = lib.platforms.unix;
+  };
+}
