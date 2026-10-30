@@ -7,12 +7,15 @@
 # 见 README「Upgrading to a new upstream version」。
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 
 # 从 package.nix 提取 version（单一来源：let version = "…";）
-VERSION=$(sed -n 's/^[[:space:]]*version = "\(.*\)";.*/\1/p' "$ROOT/package.nix" | head -1)
+PKG="$ROOT/packages/pi-web-ui/package.nix"
+LOCK="$ROOT/packages/pi-web-ui/pnpm-lock.yaml"
+
+VERSION=$(sed -n 's/^[[:space:]]*version = "\(.*\)";.*/\1/p' "$PKG" | head -1)
 if [ -z "${VERSION:-}" ]; then
-  echo "错误：无法从 $ROOT/package.nix 提取 version" >&2
+  echo "错误：无法从 $PKG 提取 version" >&2
   exit 1
 fi
 
@@ -41,8 +44,8 @@ curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o "$TMP/package-lock.js
 echo "==> pnpm import"
 (cd "$TMP" && pnpm import)
 
-cp "$TMP/pnpm-lock.yaml" "$ROOT/pnpm-lock.yaml"
-echo "==> 已更新 $ROOT/pnpm-lock.yaml"
+cp "$TMP/pnpm-lock.yaml" "$LOCK"
+echo "==> 已更新 $LOCK"
 
 # 若在 git 仓库内，展示变化概览
-git -C "$ROOT" diff --stat -- pnpm-lock.yaml 2>/dev/null || true
+git -C "$ROOT" diff --stat -- packages/pi-web-ui/pnpm-lock.yaml 2>/dev/null || true

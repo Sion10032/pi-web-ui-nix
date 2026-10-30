@@ -3,7 +3,7 @@
 #
 # 覆盖 README「升级到新上游版本」的全部步骤，每一轮失败自动修复后重试：
 #   1. git ls-remote 探测上游最新 semver tag，写回 package.nix 的 version
-#   2. 调用 dev/update-pnpm-lock.sh 重新生成 pnpm-lock.yaml
+#   2. 调用 dev/pi-web-ui/update-pnpm-lock.sh 重新生成 pnpm-lock.yaml
 #      （脚本自会进 nix develop，用 pin 住的 pnpm_11 生成）
 #   3. 版本或 lockfile 变化时，先把两个 FOD hash 置为 fakeHash，再逐轮从
 #      nix 的 "hash mismatch" 报错里解析 got: 写回 package.nix。
@@ -19,13 +19,13 @@
 #      中止，避免死循环
 #   6. 成功后验证：nix run .# -- --version 必须等于目标版本，随后 nix flake check -L
 #
-# allowBuilds / publicHoistPattern 都写在仓库根的 pnpm-workspace.yaml（数据文件，
+# allowBuilds / publicHoistPattern 都写在 packages/pi-web-ui/pnpm-workspace.yaml（数据文件，
 # package.nix 的 postPatch 只负责把它拷进源码树），所以升级时只改 YAML、不动 Nix
 # 源码；两项都是安装期配置、不进 pnpm-lock.yaml，lockfile 仅在依赖版本变化时重新生成。
 #
 # 提交与推送一律留给人工（见 AGENTS.md）。
 #
-# 用法：./dev/upgrade.sh [--no-flake-check]
+# 用法：./dev/pi-web-ui/upgrade.sh [--no-flake-check]
 #   --no-flake-check  跳过 nix flake check -L（CI 的 update.yml 用它把全量验证留给
 #                     PR 上的 ci.yml，避免重复跑 VM 测试）
 #
@@ -35,12 +35,12 @@
 #                           workflow_dispatch 的 version 输入。
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 UPSTREAM_URL="https://github.com/xing-shuyin/pi-web-ui"
 # 可被测试覆盖
-PKG="${PKG:-$ROOT/package.nix}"
-LOCK="${LOCK:-$ROOT/pnpm-lock.yaml}"
-WORKSPACE_YAML="${WORKSPACE_YAML:-$ROOT/pnpm-workspace.yaml}"
+PKG="${PKG:-$ROOT/packages/pi-web-ui/package.nix}"
+LOCK="${LOCK:-$ROOT/packages/pi-web-ui/pnpm-lock.yaml}"
+WORKSPACE_YAML="${WORKSPACE_YAML:-$ROOT/packages/pi-web-ui/pnpm-workspace.yaml}"
 
 # nix 的 lib.fakeHash（写死字面量，避免脚本依赖 nix eval）
 FAKE_HASH="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -477,7 +477,7 @@ main() {
   info "重新生成 pnpm-lock.yaml…"
   local lock_before lock_after
   lock_before=$(file_hash "$LOCK")
-  ./dev/update-pnpm-lock.sh
+  ./dev/pi-web-ui/update-pnpm-lock.sh
   lock_after=$(file_hash "$LOCK")
 
   # 版本或 lockfile 变化 → 两个 FOD 的旧 hash 都可能被热 store 静默复用，先置 fakeHash

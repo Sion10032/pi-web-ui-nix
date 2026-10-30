@@ -34,7 +34,7 @@
     in
     {
       overlays.default = final: prev: {
-        pi-web-ui = final.callPackage ./package.nix { };
+        pi-web-ui = final.callPackage ./packages/pi-web-ui/package.nix { };
       };
 
       apps = eachSystem ({ pkgs, ... }: {
@@ -51,8 +51,9 @@
         default = pkgs.mkShell {
           packages = with pkgs; [
             nodejs_22
-            # 重新生成 pnpm-lock.yaml（pnpm import）用。与 package.nix 钉同一
-            # 版本：lockfile 的生产者与 FOD fetcher 的消费者不能漂移
+            # 重新生成 pnpm-lock.yaml（pnpm import）用；仅服务 pi-web-ui 的
+            # lock 转译（pi-web 走 npm，仓库内不存 lock 副本）。与 package.nix
+            # 钉同一版本：lockfile 的生产者与 FOD fetcher 的消费者不能漂移
             pnpm_11
             nixfmt-rfc-style
           ];
@@ -60,7 +61,7 @@
       });
 
       packages = eachSystem ({ pkgs, system, ... }: {
-        pi-web-ui = pkgs.callPackage ./package.nix { };
+        pi-web-ui = pkgs.callPackage ./packages/pi-web-ui/package.nix { };
         default = self.packages.${system}.pi-web-ui;
       });
 
@@ -70,19 +71,19 @@
             let
               homeConfiguration = privateInputs.home-manager.lib.homeManagerConfiguration {
                 inherit pkgs;
-                modules = [ ./checks/home-manager.nix ];
+                modules = [ ./checks/pi-web-ui/home-manager.nix ];
                 extraSpecialArgs = { inherit self; };
               };
             in
             homeConfiguration.activation-script;
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          nixos-test = pkgs.callPackage ./checks/nixos-test.nix { inherit self; };
+          nixos-test = pkgs.callPackage ./checks/pi-web-ui/nixos-test.nix { inherit self; };
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
           darwin =
             let
               darwinConfiguration = privateInputs.nix-darwin.lib.darwinSystem {
                 modules = [
-                  ./checks/darwin.nix
+                  ./checks/pi-web-ui/darwin.nix
                   { nixpkgs.hostPlatform = system; }
                 ];
                 specialArgs = { inherit self; };
@@ -93,7 +94,7 @@
 
       nixosModules = rec {
         pi-web-ui = { lib, pkgs, ... }: {
-          imports = [ ./modules/nixos.nix ];
+          imports = [ ./modules/pi-web-ui/nixos.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
         };
         default = pi-web-ui;
@@ -101,7 +102,7 @@
 
       homeManagerModules = rec {
         pi-web-ui = { lib, pkgs, ... }: {
-          imports = [ ./modules/home-manager.nix ];
+          imports = [ ./modules/pi-web-ui/home-manager.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
         };
         default = pi-web-ui;
@@ -109,7 +110,7 @@
 
       darwinModules = rec {
         pi-web-ui = { lib, pkgs, ... }: {
-          imports = [ ./modules/darwin.nix ];
+          imports = [ ./modules/pi-web-ui/darwin.nix ];
           services.pi-web-ui.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.pi-web-ui;
         };
         default = pi-web-ui;
