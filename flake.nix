@@ -81,6 +81,7 @@
           home-manager-pi-web = homeManagerActivation ./checks/pi-web/home-manager.nix;
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           nixos-test = pkgs.callPackage ./checks/pi-web-ui/nixos-test.nix { inherit self; };
+          nixos-test-pi-web = pkgs.callPackage ./checks/pi-web/nixos-test.nix { inherit self; };
         } // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
           darwin =
             let
