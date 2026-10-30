@@ -2,22 +2,33 @@
 
 [English](README.md) | **简体中文**
 
-[pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) 的 Nix 打包与
-NixOS / nix-darwin / home-manager 模块 —— pi-web-ui 是 AI 编程代理（pi / DSH）
-的浏览器驾驶舱：聊天、代码、文件、终端与 Git 集于一页。
+为 [pi coding agent](https://github.com/badlogic/pi-mono) 的**两个** Web UI
+提供 Nix 打包与 NixOS / nix-darwin / home-manager 模块：
 
-本 flake 提供：
+| | [pi-web-ui](packages/pi-web-ui) | [pi-web](packages/pi-web) |
+|---|---|---|
+| 上游 | [xing-shuyin/pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) | [agegr/pi-web](https://github.com/agegr/pi-web) |
+| 定位 | 浏览器驾驶舱：聊天、代码、文件、终端、Git 集于一页 | pi 代理的 Next.js Web UI |
+| 默认端口 | `8787` | `30141` |
+| 构建路线 | pnpm（`fetchPnpmDeps`），lock 副本在仓库内，由上游 `package-lock.json` 转译 | npm（`buildNpmPackage` + `fetchNpmDeps`），直接用上游 lock，仓库内不存副本 |
+| 运行期状态 | `~/.local/state/pi-web-ui`（`dataDir`）+ pi agent 目录 | 只有 pi agent 目录（`~/.pi/agent`、`PI_CODING_AGENT_DIR`），无独立 dataDir |
+| 包输出 | `packages.<system>.pi-web-ui`（同时是 `.default`） | `packages.<system>.pi-web` |
 
-- `packages.<system>.pi-web-ui`（及 `.default`）—— pi-web-ui 的 server/CLI，
-  以 pnpm 从 GitHub 源码 tag 构建（`fetchPnpmDeps` + `pnpmConfigHook`）
-- `overlays.default`
-- `nixosModules.default`、`darwinModules.default`、`homeManagerModules.default`
-- `apps.<system>.update-dev-private-narHash`
-- `devShells.<system>.default`
-- `checks`：NixOS VM 测试（Linux）、home-manager activation 检查（全系统）、
-  darwin toplevel 构建（仅 darwin）
+两者可同机并存（默认端口不同）。想一次配置两者时 import 聚合模块
+（`*.all`）即可。
 
 支持的系统：`x86_64-linux`、`aarch64-linux`、`aarch64-darwin`。
+
+## flake 输出
+
+- `packages.<system>.pi-web-ui`、`.pi-web`，以及 `.default`（= `pi-web-ui`）
+- `overlays.default`（同时提供两个包）
+- `nixosModules.{pi-web-ui,pi-web,all,default}`，`homeManagerModules` 与
+  `darwinModules` 同构；`default` 仍指 pi-web-ui
+- `apps.<system>.update-dev-private-narHash`
+- `devShells.<system>.default`（nodejs 22 + pnpm_11 + nixfmt-rfc-style）
+- `checks`：`home-manager`、`home-manager-pi-web`（全系统）；`nixos-test`、
+  `nixos-test-pi-web`（Linux）；`darwin`、`darwin-pi-web`（darwin）
 
 ## 用法
 
@@ -31,7 +42,7 @@ NixOS / nix-darwin / home-manager 模块 —— pi-web-ui 是 AI 编程代理（
 }
 ```
 
-### NixOS
+NixOS，单个包：
 
 ```nix
 {
@@ -41,9 +52,9 @@ NixOS / nix-darwin / home-manager 模块 —— pi-web-ui 是 AI 编程代理（
     nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
-        pi-web-ui-nix.nixosModules.default
+        pi-web-ui-nix.nixosModules.pi-web
         {
-          services.pi-web-ui = {
+          services.pi-web = {
             enable = true;
             user = "sion";
           };
@@ -54,274 +65,70 @@ NixOS / nix-darwin / home-manager 模块 —— pi-web-ui 是 AI 编程代理（
 }
 ```
 
-这会创建一个以指定 `user` 运行的 `systemd.services.pi-web-ui` 系统服务。
+其余平台同构：`nix-darwin` 用 `darwinModules.*`（需 `user`），home-manager 用
+`homeManagerModules.*`（无 `user`，以当前用户运行）。要同时启用两个 UI，用
+`nixosModules.all`（或对应的 `*.all`）。
 
-### nix-darwin
+完整的模块选项、各包用法示例与升级/故障排查细节见各包 README：
 
-```nix
-{
-  inputs.pi-web-ui-nix.url = "github:Sion10032/pi-web-ui-nix";
-
-  outputs = { self, nix-darwin, pi-web-ui-nix }: {
-    darwinConfigurations.myhost = nix-darwin.lib.darwinSystem {
-      system = "aarch64-darwin";
-      modules = [
-        pi-web-ui-nix.darwinModules.default
-        {
-          services.pi-web-ui = {
-            enable = true;
-            user = "sion";
-          };
-        }
-      ];
-    };
-  };
-}
-```
-
-这会为指定 `user` 创建一个 `launchd` agent。
-
-### home-manager
-
-Linux 与 macOS 均可用（Linux 为 `systemd.user` 服务，macOS 为 `launchd`
-agent）：
-
-```nix
-{
-  inputs.pi-web-ui-nix.url = "github:Sion10032/pi-web-ui-nix";
-
-  outputs = { self, nixpkgs, home-manager, pi-web-ui-nix }: {
-    homeConfigurations.me = home-manager.lib.homeManagerConfiguration {
-      pkgs = nixpkgs.legacyPackages.x86_64-linux;
-      modules = [
-        pi-web-ui-nix.homeManagerModules.default
-        {
-          services.pi-web-ui.enable = true;
-        }
-      ];
-    };
-  };
-}
-```
-
-这里没有 `user` 选项 —— 服务以当前用户身份运行。
-
-#### 开放端口
-
-home-manager 以用户身份运行，管不了主机防火墙，因此本模块没有
-`openFirewall` 选项（该选项只存在于 NixOS 模块）。若要让其他机器访问服务：
-
-1. 监听所有网卡 —— 默认 `host` 只绑定回环地址：
-
-   ```nix
-   services.pi-web-ui.host = "0.0.0.0";
-   ```
-
-2. 在**主机**层面开放所配置的端口（`port`，默认 `8787`）：
-
-   - NixOS 主机上，要么直接用 NixOS 模块并开启
-     `services.pi-web-ui.openFirewall = true;`，要么自行放行端口：
-
-     ```nix
-     networking.firewall.allowedTCPPorts = [ 8787 ];
-     ```
-
-   - macOS 上 launchd agent 本机可直接访问；若启用了应用防火墙，
-     按提示放行 `pi-web-ui` 即可。
-
-## 选项
-
-通用选项（三个模块均有；前缀为 `services.pi-web-ui.`）：
-
-| 名称 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `enable` | bool | `false` | 是否启用 pi-web-ui。 |
-| `package` | package | *(由 wrapper 模块注入)* | 使用的 pi-web-ui 包。 |
-| `port` | port | `8787` | 监听端口（`PI_WEB_PORT`）。 |
-| `host` | str | `"127.0.0.1"` | 绑定地址（`PI_WEB_HOST`）。 |
-| `cwd` | str | `"~"` | 代理的工作区根目录；`~` 展开为服务用户的 home（`PI_WEB_CWD`）。 |
-| `dataDir` | str | `"~/.local/state/pi-web-ui"` | 数据目录；`~` 前缀展开为服务用户的 home（`PI_WEB_DATA_DIR`）。 |
-| `engine` | enum `["pi" "dsh"]` | `"pi"` | 驱动的代理引擎（`PI_WEB_ENGINE`）。 |
-| `allowOrigins` | listOf str | `[]` | 额外允许的 CORS 来源，逗号拼接（`PI_WEB_ALLOW_ORIGINS`）。 |
-| `allowHosts` | listOf str | `[]` | Host 头白名单的 hostname 列表，逗号拼接（`PI_WEB_ALLOW_HOSTS`）——反向代理转发公网域名 Host 时必填。严格模式：非空后回环/私网兜底失效，仍需本机/局域网直连的要把对应条目一并列入。 |
-| `codingAgentDir` | nullOr str | `null` | pi 配置目录，非默认 `~/.pi/agent` 时指定（`PI_CODING_AGENT_DIR`）。 |
-| `environment` | attrsOf str | `{}` | 服务的额外环境变量（逃生口）。 |
-| `extraArgs` | listOf str | `[]` | 追加到 pi-web-ui 的额外 CLI 参数（服务始终传入 `--no-browser`）。 |
-
-仅 NixOS 的选项（`modules/nixos.nix`）：
-
-| 名称 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `user` | str | *（必填，无默认值）* | 运行 pi-web-ui 的用户。需对其项目文件与 `~/.pi/agent` 有读写权限。 |
-| `openFirewall` | bool | `false` | 为所配置的端口开放防火墙。 |
-
-仅 darwin 的选项（`modules/darwin.nix`）：
-
-| 名称 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `user` | str | *（必填，无默认值）* | 运行 LaunchAgent 的 macOS 用户；用于展开 `cwd`/`dataDir` 中的 `~`。 |
-
-home-manager 没有 `user` 选项 —— 服务以当前用户身份运行。
+- [packages/pi-web-ui/README.md](packages/pi-web-ui/README.md)
+- [packages/pi-web/README.md](packages/pi-web/README.md)
 
 ## 直接运行
 
 ```console
-$ nix run github:Sion10032/pi-web-ui-nix -- --version
+$ nix run github:Sion10032/pi-web-ui-nix -- --version              # pi-web-ui
+$ nix run github:Sion10032/pi-web-ui-nix#pi-web -- --version       # pi-web
 ```
 
 ## 开发
 
-进入开发 shell（nodejs 22 + pnpm + nixfmt-rfc-style）：
+进入 devShell（nodejs 22 + pnpm_11 + nixfmt-rfc-style）：
 
 ```console
 $ nix develop
 ```
 
-本 flake 的 `checks` 引用了 `home-manager` 与 `nix-darwin`，它们**不是**
-公共 flake 自身的 `inputs` —— 而是放在 `dev/private/flake.nix` 这个私有
-dev flake 里，求值时经 `loadPrivateFlake` 加载（见 `flake.nix`）。这样公共
-input 图保持最小：拉取 `github:Sion10032/pi-web-ui-nix` 的用户不会下载和
-求值这些仅测试用的 input，同时 `nix flake check` 仍会用真实的
-home-manager / nix-darwin 检验各模块。[sops-nix](https://github.com/Mic92/sops-nix)
-也采用同一模式（见其 `dev/private`）。
+`pnpm_11` 只为 pi-web-ui 的 lock 转译服务；pi-web 走 npm，仓库内没有它的 lock
+副本。
 
-由于对 `path:` 来源使用 `builtins.getFlake` 需要固定的内容哈希，私有
-flake 的路径通过 `dev/private.narHash` 锁定。修改 `dev/private/flake.nix`
-或其 lockfile 后，刷新该锁定：
+flake 的 `checks` 引用了**不在**公开 flake `inputs` 里的 `home-manager` 与
+`nix-darwin` 输入 —— 它们放在 `dev/private/flake.nix`，评估期通过
+`loadPrivateFlake` 载入（见 `flake.nix`）。这样公开输入图保持最小：拉
+`github:Sion10032/pi-web-ui-nix` 的用户不会下载或评估测试专用输入，而
+`nix flake check` 仍能对着真实的 home-manager / nix-darwin 验证模块。同样的
+做法见 [sops-nix](https://github.com/Mic92/sops-nix)（其 `dev/private`）。
+
+由于对 `path:` 源调用 `builtins.getFlake` 需要固定内容 hash，私有 flake 的路径
+由 `dev/private.narHash` 锁定。改动 `dev/private/flake.nix` 或其 lockfile 后刷新
+该固定值：
 
 ```console
 $ nix run .#update-dev-private-narHash
 ```
 
-## 升级到新上游版本
+## 升级
 
-常规情况下不需要手工做这件事：[`.github/workflows/update.yml`](./.github/workflows/update.yml)
-每天定时（也可手动触发）跑 `dev/upgrade.sh` 并开出 PR。本地跑脚本用于修复
-半途失败的升级，或验证对脚本本身的改动。
+两个包各自自动升级，一个包一个 workflow，各自驱动对应脚本（本地与 CI 共用同一
+份实现）：
 
-```console
-$ ./dev/upgrade.sh
-```
+| 包 | 脚本 | workflow | 定时（UTC） |
+|---|---|---|---|
+| pi-web-ui | `dev/pi-web-ui/upgrade.sh` | `.github/workflows/update-pi-web-ui.yml` | 03:00 |
+| pi-web | `dev/pi-web/upgrade.sh` | `.github/workflows/update-pi-web.yml` | 04:00 |
 
-一条命令升到上游最新 tag，并一直迭代到构建全绿。脚本做的事：
+脚本探测上游最新 tag、改写版本号、逐轮迭代固定输出 hash 直到构建通过，然后用
+`nix run`/`nix flake check` 自检；workflow 负责开 PR。细节（含手工修复中断的升级）：
 
-1. 用 `git ls-remote` 探测最新 semver tag，写回 `package.nix` 的
-   `let version = "…"` 绑定；
-2. 调用 `dev/update-pnpm-lock.sh` 从该 tag 重新生成 `pnpm-lock.yaml`
-   （版本忠实保留、缺失 integrity 由 registry 元数据补齐；始终在
-   `nix develop` 内用 pin 住的 `pnpm_11` 生成）；
-3. 把两个 FOD hash 先置为 `lib.fakeHash`，再逐轮从 nix 的 mismatch 报错里
-   解析 `got: sha256-…` 写回（先重置的原因见下方「热 store 陷阱」）；
-4. 遇到 `ERR_PNPM_IGNORED_BUILDS` 时，把报错里的包名并入 `allowBuilds`；
-5. 修复幽灵依赖：出现 `TS2307 Cannot find module 'X'` 且 `X` 在 lockfile 里时，
-   把 `X` 的 scope 加进 `publicHoistPattern` 后重试（同一模块二次失败即中止，
-   不会死循环）；
-6. 验证：`nix run .# -- --version` 必须输出新版本，`nix flake check -L`
-   必须通过（NixOS VM 测试 + home-manager）。
+- [pi-web-ui 升级流程](packages/pi-web-ui/README.md#upgrading-to-a-new-upstream-version)
+- [pi-web 升级流程](packages/pi-web/README.md#upgrading-to-a-new-upstream-version)
 
-`allowBuilds` / `publicHoistPattern` 放在仓库跟踪的
-[`pnpm-workspace.yaml`](./pnpm-workspace.yaml) 里，由 `postPatch` 拷进上游源码树 ——
-脚本改的是这个数据文件，而不是 Nix 源码。两项都是安装期配置，**从不进入
-`pnpm-lock.yaml`**；lockfile 变动只因依赖版本变了。
+## CI
 
-提交与推送仍留给人工（脚本只打印 diff stat，从不碰 git 历史）。中途失败
-直接重跑即可：脚本幂等，会从当前状态继续。
-
-### CI 里的同一套流程
-
-[`.github/workflows/update.yml`](./.github/workflows/update.yml) 每天定时
-（也可手动触发）跑同一个脚本并开 PR —— hash / allowBuilds / 幽灵依赖的迭代
-逻辑只有这一份实现，不会出现两处逻辑漂移。它用 `UPGRADE_TARGET_VERSION`
-透传目标版本（手动触发的 version 输入就是靠它生效），并用 `--no-flake-check`
-把全量验证留给 PR 上的 `ci.yml`。
-
-### 手工流程
-
-脚本修不了、或需要 review 时用：
-
-1. 改 `package.nix` 里 `let version = "…"` 绑定的版本号。
-
-2. 重新生成 lockfile：
-
-   ```console
-   $ ./dev/update-pnpm-lock.sh
-   ```
-
-3. 迭代两个 hash（`nix build .#pi-web-ui -L`，把 mismatch 报错里的
-   `got: sha256-…` 逐个抄回 `package.nix`）：先 `src`，后 `pnpmDeps.hash`。
-
-   热 store 陷阱：FOD 输出路径由 `(name, outputHash)` 决定，旧 hash 原封
-   不动时 nix 会直接复用 store 里已有的旧输出、不报 mismatch —— 若构建
-   报出与上一个版本有关的诡异错误（如 `ERR_PNPM_OUTDATED_LOCKFILE` 列出
-   新版已不存在的依赖），说明旧 `src` 输出被静默复用了。把旧 hash 改成
-   `lib.fakeHash` 强制重 fetch，即可拿到真实的 `got:` 值（`upgrade.sh`
-   开头就是这么做的）。
-
-4. 若构建报 `ERR_PNPM_IGNORED_BUILDS`，把报错列出的包名加入
-   `pnpm-workspace.yaml` 的 `allowBuilds` 映射。
-
-5. 验证：`nix run .# -- --version` 应输出新版本号，`nix flake check -L`
-   应仍然通过。
-
-## 故障排查
-
-### 为什么用 pnpm 而不是 npm（上游 shrinkwrap 问题）
-
-`@earendil-works/pi-coding-agent` 发布的 tarball 内嵌了一份
-`npm-shrinkwrap.json`，其中 5 个 `@earendil-works/*` 依赖有 `resolved`
-URL 却没有 `integrity` 字段。npm 对带 shrinkwrap 的依赖子树会原样继承 ——
-包括缺失的 integrity —— 因此任何 `npm install`（包括全新解析）都会复现
-这个缺口，nixpkgs 的 `fetchNpmDeps` 也因此拒绝构建。pnpm 不解析依赖内嵌
-的 shrinkwrap，且 `pnpm import` 在把上游 `package-lock.json` 转成
-`pnpm-lock.yaml` 时会用 registry 元数据补齐缺失的 integrity（版本逐字
-保留）。若上游某天修复或去掉该 shrinkwrap，迁回 `buildNpmPackage` 并非
-难事。
-
-四个 pnpm 相关处理：
-
-- 钉住的 `pnpm_11`（fetcher 与 devShell 一致）：deps hash 绑定 fetch 时
-  所用的 pnpm 版本；top-level `pnpm` 随 unstable 滚动（任意 minor bump
-  都可能改变 store 内容、打破 hash），版本化别名基本冻结 —— 下游用
-  `follows` 覆盖本 flake 的 `nixpkgs` 输入时仍能命中同一 hash。devShell
-  同钉一版，保证 `pnpm import`（lockfile 生产者）与 fetcher（消费者）不
-  漂移；`dev/update-pnpm-lock.sh` 始终在 `nix develop` 内执行以强制这
-  一点。nixpkgs 移除 `pnpm_11` 时迁移到当时的别名并重算 hash。
-- `prePnpmInstall` 中的 `pnpm config set minimum-release-age 0`：pnpm ≥ 12
-  默认拒绝发布时间早于某阈值的包；本仓库经常打包上游发布仅一天的版本，
-  且由冻结、经审的 lockfile 钉住，故对 fetcher 显式放宽该策略。
-- [`pnpm-workspace.yaml`](./pnpm-workspace.yaml)（本仓库跟踪，由 `postPatch`
-  拷进上游源码树）：pnpm ≥ 10 起 pnpm 专属配置必须写在这个文件里（`.npmrc`
-  里的同名键会被静默忽略），而上游用 npm 开发、不提供该文件。下面两项补的
-  都是「npm 能过、pnpm 不过」的差异；升级时由 `dev/upgrade.sh` 自动维护。
-  - `allowBuilds`：pnpm ≥ 11 要求显式批准依赖的构建脚本（`node-pty` 的
-    node-gyp 编译、esbuild 等）；默认 `strictDepBuilds=true` 会让未批准的
-    脚本直接变成 install 硬失败，键名取自 `ERR_PNPM_IGNORED_BUILDS` 的
-    `Ignored build scripts:` 列表。（`onlyBuiltDependencies` 是 v11 之前的
-    旧写法，pnpm ≥ 11 读得到但不会执行。）
-  - `publicHoistPattern: ["@earendil-works/*"]`：v0.105.x 起 server 代码
-    直接 import `@earendil-works/pi-tui`（`server/virtual-tui.ts`、
-    `server/webui-context.ts`），但上游 `package.json` 从未声明它 —— pi-tui
-    只是 pi-coding-agent 的传递依赖。上游 CI 用 npm 安装：扁平
-    `node_modules` 会把传递依赖 hoist 到顶层，幽灵 import 恰好能解析；
-    pnpm 的隔离布局下根 `node_modules` 只链接 importers 声明的包，tsc 报
-    TS2307。把整个 `@earendil-works` 命名空间公开提升到根目录可恢复
-    npm 等价的解析语义，也覆盖未来同命名空间的新幽灵 import。hoisting
-    是安装期布局行为，从不进入 `pnpm-lock.yaml`，因此
-    `update-pnpm-lock.sh` 无需改动。
-
-### nix-darwin `launchd.agents` schema 变更（unstable / 26.11）
-
-近期的 nix-darwin 更改了 `launchd.agents.<name>` 的选项 schema：不再有
-`.enable` 选项和自由形式的 `.config`，plist 键直接放在 `.serviceConfig`
-之下。本仓库的 `modules/darwin.nix` 已按新 schema 编写（见该文件内的
-NOTE 注释），因此需要较新的 nix-darwin。如果你要在旧版 nix-darwin 上
-覆写或移植本模块，需要改回旧写法
-（`launchd.agents.<name>.enable = true; launchd.agents.<name>.config = { … }`）。
-
-与之无关的一点：home-manager 模块（`modules/home-manager.nix`）在 macOS
-上同样定义了 `launchd.agents.<name>`，但那是 **home-manager 自有**的
-选项集，仍使用 `.enable` + 自由形式 `.config`，不受 nix-darwin 的
-schema 变更影响。
+`.github/workflows/ci.yml` 在每次 push 到 `main` 与每个 PR 上，于
+`ubuntu-24.04` 和 `macos-15` 跑 `nix flake check -L`：两个 NixOS VM 测试在
+Linux 跑，darwin toplevel 构建与 home-manager activation 检查在各自系统跑。两个
+更新 workflow 只构建并自检自己那个包，全量检查留给 PR。
 
 ## License
 
