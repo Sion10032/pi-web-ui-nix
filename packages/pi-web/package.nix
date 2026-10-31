@@ -5,6 +5,7 @@
   buildNpmPackage,
   fetchFromGitHub,
   nodejs_22,
+  autoPatchelfHook,
   curl,
   cacert,
 }:
@@ -77,6 +78,22 @@ buildNpmPackage {
   # 不带该 flag 时是 no-op——实测本包的 pty.node 全部来自 prebuilds，
   # 产物中无 build/Release）。
   npmFlags = [ "--ignore-scripts" ];
+
+  # node-pty 1.2.0-beta.15 的 tarball 自带六平台 prebuilds（含 linux），
+  # --ignore-scripts 下没有本地编译，pty.node 是上游 CI 预编译的 ELF：
+  # rpath 为空，裸 ldd 报 libstdc++.so.6 not found，运行期靠 node 进程
+  # 自带的 libstdc++ 搭便车（dlopen 复用同 soname 已加载的库）。
+  # autoPatchelfHook 把本环境 libstdc++ 的 store 路径写进 rpath，让
+  # pty.node 自洽，不再依赖宿主 node 链接的符号版本（上游换新工具链
+  # 编出的 GLIBCXX 符号若超出 nixpkgs node 的 libstdc++ 就会运行期炸）。
+  # darwin 上 autoPatchelfHook 为 no-op（Mach-O 不归它管）。
+  nativeBuildInputs = [ autoPatchelfHook ];
+  buildInputs = [ stdenv.cc.cc.lib ];
+  # @earendil-works/pi-tui 也带预编译 ELF（native/…/linux-platform-x11.node，
+  # 链接 libxcb）：那是 pi 终端 TUI 的 X11 后端，Web 服务场景不会加载，
+  # 为它引入整棵 X11 依赖树不值得，故显式忽略（与 pi-web-ui 既有姿态
+  # 一致：它的 pi-tui 同样未 patch，一直靠不加载过关）。
+  autoPatchelfIgnoreMissingDeps = [ "libxcb.so.1" ];
 
   env.NEXT_TELEMETRY_DISABLED = "1";
 
