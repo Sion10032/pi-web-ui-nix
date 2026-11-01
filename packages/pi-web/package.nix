@@ -86,14 +86,20 @@ buildNpmPackage {
   # autoPatchelfHook 把本环境 libstdc++ 的 store 路径写进 rpath，让
   # pty.node 自洽，不再依赖宿主 node 链接的符号版本（上游换新工具链
   # 编出的 GLIBCXX 符号若超出 nixpkgs node 的 libstdc++ 就会运行期炸）。
-  # darwin 上 autoPatchelfHook 为 no-op（Mach-O 不归它管）。
-  nativeBuildInputs = [ autoPatchelfHook ];
-  buildInputs = [ stdenv.cc.cc.lib ];
+  #
+  # 必须 gate 在 Linux：autoPatchelfHook 的 hook 无平台判断
+  # （`postFixupHooks+=(autoPatchelfPostFixup)`），它在 darwin 上也会扫
+  # $out，而产物里躺着 node-pty / pi-tui 的 **linux** prebuilds（真 ELF）。
+  # macOS 上 patchelf 不存在，于是报 `patchelf: command not found`，随后
+  # 尝试打开 ELF 的 interpreter 而抛 `ELFError: Magic number does not
+  # match`，整个构建硬失败（CI 的 macos-15 job 就是这么挂的）。
+  nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [ stdenv.cc.cc.lib ];
   # @earendil-works/pi-tui 也带预编译 ELF（native/…/linux-platform-x11.node，
   # 链接 libxcb）：那是 pi 终端 TUI 的 X11 后端，Web 服务场景不会加载，
   # 为它引入整棵 X11 依赖树不值得，故显式忽略（与 pi-web-ui 既有姿态
   # 一致：它的 pi-tui 同样未 patch，一直靠不加载过关）。
-  autoPatchelfIgnoreMissingDeps = [ "libxcb.so.1" ];
+  autoPatchelfIgnoreMissingDeps = lib.optionals stdenv.hostPlatform.isLinux [ "libxcb.so.1" ];
 
   env.NEXT_TELEMETRY_DISABLED = "1";
 
