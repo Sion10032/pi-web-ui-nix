@@ -129,6 +129,52 @@ buildNpmPackage {
     ''}
   '';
 
+  # 只保留本平台的预编译产物：node-pty 的 tarball 带六平台 prebuilds，pi-tui 带
+  # native/{darwin,linux,win32}；node-gyp-build 运行期按 process.platform /
+  # process.arch 选目录，其余全是死重量（实测 win32 的两个 pty.node 各 12MB，
+  # 占 566M 产物里的 24M）。除了体积，它们还会踩到平台专属的 hook：
+  #   - 在 macOS 上，linux 的 ELF 让 audit-tmpdir 逐个调用不存在的 patchelf
+  #     （纯噪音，不失败）；
+  #   - 在 Linux 上，auto-patchelf 会给永远不会加载的 aarch64 ELF 写入 x86_64
+  #     的 rpath（无害但荒谬）。
+  # 先例：nixpkgs 的 pi-coding-agent 包同样在 darwin 上删除 Linux 二进制。
+  #
+  # 挂在 postInstall 而非 postFixup 是有意的：audit-tmpdir 在 fixupPhase 的
+  # fixupOutputHooks 里运行，删除必须早于它（npmInstallHook 的 installPhase
+  # 会 runHook postInstall）。
+  postInstall =
+    let
+      inherit (stdenv.hostPlatform) isDarwin isAarch64;
+      keepPty = "${if isDarwin then "darwin" else "linux"}-${if isAarch64 then "arm64" else "x64"}";
+      keepTui = if isDarwin then "darwin" else "linux";
+      drop = keep: all: builtins.filter (p: p != keep) all;
+      rmLine = rel: ''rm -rf "$nm/${rel}"'';
+    in
+    ''
+      nm="$out/lib/node_modules/@agegr/pi-web/node_modules"
+      ${lib.concatMapStringsSep "\n" rmLine (
+        map (p: "node-pty/prebuilds/${p}") (
+          drop keepPty [
+            "darwin-arm64"
+            "darwin-x64"
+            "linux-arm64"
+            "linux-x64"
+            "win32-arm64"
+            "win32-x64"
+          ]
+        )
+      )}
+      ${lib.concatMapStringsSep "\n" rmLine (
+        map (p: "@earendil-works/pi-tui/native/${p}") (
+          drop keepTui [
+            "darwin"
+            "linux"
+            "win32"
+          ]
+        )
+      )}
+    '';
+
   meta = {
     description = "Web UI for the pi coding agent";
     homepage = "https://github.com/agegr/pi-web";
