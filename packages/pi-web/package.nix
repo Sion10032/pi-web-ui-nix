@@ -10,13 +10,13 @@
   cacert,
 }:
 let
-  version = "0.16.0";
+  version = "0.17.0";
 
   src = fetchFromGitHub {
     owner = "agegr";
     repo = "pi-web";
     tag = "v${version}";
-    sha256 = "sha256-46agQfK0336I4FbrOCnwd3dQ348IN1QiRvWqe+zcfW0=";
+    sha256 = "sha256-OLQ9RzT7/OMV7x4AO5BuEqk8WvqbTwzB6yeaoUQRid8=";
   };
 
   # next/font/google 在构建期从 fonts.googleapis.com 取字体 CSS、再从
@@ -34,7 +34,7 @@ let
 
   notoSansMonoFonts = stdenvNoCC.mkDerivation {
     pname = "noto-sans-mono-woff2";
-    version = "0.16.0";
+    version = "0.17.0";
     # 递归 hash：输出是一个目录（CSS + 若干 woff2），不是单个文件
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
@@ -67,7 +67,7 @@ buildNpmPackage {
   inherit version src;
   nodejs = nodejs_22;
 
-  npmDepsHash = "sha256-eXfQPNaJkgnKX73LwmLJNeNTpmaKVluiscrftVonINY=";
+  npmDepsHash = "sha256-5tnuixHqVoDj7079JchwrAhSjREZ5LpP1bz29H3oON0=";
 
   # devDependencies 里的 playwright 带 postinstall（会下载浏览器），故所有
   # 依赖脚本一律跳过。node-pty 1.2.0-beta.15 的 tarball 自带
