@@ -8,13 +8,13 @@
   nodejs_22,
   python3,
 }: let
-  version = "0.121.0";
+  version = "0.121.3";
 
   src = fetchFromGitHub {
     owner = "xing-shuyin";
     repo = "pi-web-ui";
     tag = "v${version}";
-    sha256 = "sha256-I1XV5Ps2gLDsKPLTIQCN/fZFKtKoNr6CM1oLq4sXMTE=";
+    sha256 = "sha256-SiFRaKA7DcmadmYfkVo1XD6vLkyKKKjObPqD3yrjFH0=";
   };
 in
   # 为什么用 pnpm 而不是 buildNpmPackage：
@@ -76,7 +76,7 @@ in
       # (name, outputHash) 决定，沿用旧 hash 时本地 store 已有的旧输出会被
       # 直接复用、跳过构建，造成“hash 兼容”的假绿——pnpm_11 首次引入时就
       # 是这样被误判为无需重算的。
-      hash = "sha256-c9Uh6LgmeAtA9IBC7KbftybbwHoKOelkCuepPz4Xi8U=";
+      hash = "sha256-kmBFBwjzWHGYumRxN7aEZ4OxJd8K6eXn2K3PGXPBQI0=";
     };
 
     nativeBuildInputs = [
